@@ -41,6 +41,9 @@ concurrency:
   group: Kubeadm Bringup E2E-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
 jobs:
   bringup:
     name: kubeadm bringup (2 VMs, ${{ matrix.arch }})

@@ -37,6 +37,9 @@ concurrency:
   group: Release-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
   cancel-in-progress: false
 
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
 jobs:
   license-checks:
     name: License checks (gate)

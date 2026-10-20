@@ -61,6 +61,7 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
+  GOPROXY: https://proxy.golang.org|direct
   CHART: controller/deploy/charts/controller
 
 jobs:

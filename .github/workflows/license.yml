@@ -73,6 +73,7 @@ concurrency:
 # That job reads its Go version from go.work instead, so the version mismatch
 # above cannot bite it. See the job for both.
 env:
+  GOPROXY: https://proxy.golang.org|direct
   GOWORK: "off"
 
 jobs:

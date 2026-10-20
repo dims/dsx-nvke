@@ -44,6 +44,9 @@ concurrency:
   group: API Compatibility-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
 jobs:
   api-compat:
     name: Check the OpenAPI spec is backward compatible

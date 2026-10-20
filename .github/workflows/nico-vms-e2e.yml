@@ -78,6 +78,9 @@ concurrency:
   group: NICo VMs E2E-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
 jobs:
   # A mirror-branch push carries base-branch commits too, so the paths above
   # fire for every pull request updated after a nico-vms change lands on main.

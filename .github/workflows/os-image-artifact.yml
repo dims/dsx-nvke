@@ -122,6 +122,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/pull-request/') }}
 
 env:
+  GOPROXY: https://proxy.golang.org|direct
   REPO_FDE: ghcr.io/dsx-ai-factory/nvke/os-image-fde
   REPO_NON_FDE: ghcr.io/dsx-ai-factory/nvke/os-image-non-fde
   # The GHCR hand-off alias. A run on main (a push or the schedule) gets its own

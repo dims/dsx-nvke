@@ -48,6 +48,9 @@ concurrency:
   group: kind-stack-from-release-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
 jobs:
   smoke:
     name: deploy/nico on kind from a release

@@ -54,6 +54,9 @@ concurrency:
   group: CLI S3 Publish-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
 jobs:
   publish:
     if: >-

@@ -47,6 +47,9 @@ concurrency:
   group: Generate Check-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
 jobs:
   generate-check:
     name: Check generated API code is up to date

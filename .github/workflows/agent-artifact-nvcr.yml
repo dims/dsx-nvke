@@ -53,6 +53,9 @@ concurrency:
   group: Agent Artifact NVCR-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
   cancel-in-progress: false
 
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
 jobs:
   publish:
     if: github.repository_id == '1323115536'

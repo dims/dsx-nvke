@@ -62,6 +62,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  GOPROXY: https://proxy.golang.org|direct
   REPO: ghcr.io/dsx-ai-factory/nvke/agent
 
 jobs:

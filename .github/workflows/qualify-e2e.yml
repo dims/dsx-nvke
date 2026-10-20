@@ -226,6 +226,9 @@ concurrency:
   group: ${{ github.workflow }} ${{ github.ref }} ${{ (inputs.dry-run == true || github.event.label.name == 'qualify-e2e-dry-run') && 'dry-run' || 'run' }}
   cancel-in-progress: false
 
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
 jobs:
   # Resolves what to qualify and writes it as plan.json. It takes no hardware:
   # it reads this repository's tags and the artifact bucket, so it runs on the

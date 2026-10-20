@@ -69,6 +69,9 @@ concurrency:
   # Do not cancel a run on main; the newer workflows here all guard this.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
 jobs:
   work-check:
     name: Check go.work and go.work.sum are current

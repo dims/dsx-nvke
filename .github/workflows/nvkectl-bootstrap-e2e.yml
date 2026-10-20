@@ -71,6 +71,9 @@ concurrency:
   group: nvkectl bootstrap e2e-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
 jobs:
   e2e:
     name: e2e (${{ matrix.arch }})

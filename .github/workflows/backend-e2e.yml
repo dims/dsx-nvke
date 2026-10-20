@@ -112,6 +112,9 @@ on:
 
 permissions: {}
 
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
 jobs:
   e2e:
     name: ${{ inputs.backend }}-e2e (${{ inputs.arch }})

@@ -29,6 +29,9 @@ concurrency:
   group: Package reproducibility-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
 jobs:
   repro:
     if: github.repository_id == '1323115536'

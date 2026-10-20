@@ -46,6 +46,9 @@ concurrency:
   group: Gofail E2E-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || '' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+env:
+  GOPROXY: https://proxy.golang.org|direct
+
 jobs:
   gofail:
     name: Gofail E2E (${{ matrix.arch }})
