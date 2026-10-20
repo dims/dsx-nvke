@@ -98,4 +98,17 @@ jobs:
             **/go.sum
 
       - name: Verify the workspace is current
-        run: make work-check
+        # A sum.golang.org or proxy.golang.org stream error fails the full
+        # refresh mid-download, and GOPROXY's |direct fallback does not reach
+        # the checksum database. Try again on that shape only; any other
+        # failure keeps its first exit code.
+        run: |
+          log="${RUNNER_TEMP}/work-check.log"
+          for attempt in 1 2 3; do
+            rc=0; make work-check > "${log}" 2>&1 || rc=$?
+            cat "${log}"
+            if [ "${rc}" = 0 ]; then exit 0; fi
+            if [ "${attempt}" = 3 ] || ! grep -q -E '(sum|proxy)\.golang\.org.*(stream error|unexpected EOF|connection reset)' "${log}"; then exit "${rc}"; fi
+            echo "work-check hit a transient Go module fetch error, retrying in 15s"
+            sleep 15
+          done
