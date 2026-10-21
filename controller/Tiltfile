@@ -1170,6 +1170,13 @@ _controller_profiles_runbooks_dir = os.path.join(_controller_profiles_context, "
 # profiles into the Tilt controller image and skip live_update sync into the read-only mount.
 _controller_profiles_image_enabled = True
 
+# CI sets NKE_E2E_DOCKERHUB_MIRROR so the images Tilt builds take their base from
+# the Docker Hub mirror the other lanes use, as hack/backend-e2e-lib.sh's
+# dockerhub_build_args does for the prebuilt ones (both Tilt Dockerfiles declare
+# ARG BASE_REGISTRY=docker.io for it). Unset, the base comes from Docker Hub.
+_dockerhub_mirror = os.getenv("NKE_E2E_DOCKERHUB_MIRROR", "") or _tilt_env.get("NKE_E2E_DOCKERHUB_MIRROR", "")
+_mirror_build_args = ('--build-arg "BASE_REGISTRY=%s/library"' % _dockerhub_mirror) if _dockerhub_mirror else ""
+
 if _controller_profiles_image_enabled:
     if _controller_profiles_preloaded:
         print("Using preloaded docker.local/cwe-profiles:tilt image")
@@ -1189,8 +1196,8 @@ if _controller_profiles_image_enabled:
                 if [ "$(uname -s)" = "Darwin" ] && [ -z "${DOCKER_HOST:-}" ]; then
                   export DOCKER_HOST="${COLIMA_DOCKER_HOST:-unix://${HOME}/.colima/default/docker.sock}"
                 fi
-                retry() { "$@" || { echo "docker build failed, retrying once in 15s" >&2; sleep 15; "$@"; }; }; retry docker build --platform linux/%s --tag "$EXPECTED_REF" -f "%s" "%s"
-                """ % (_controller_tilt_goarch, _controller_profiles_dockerfile, _controller_profiles_context),
+                retry() { "$@" || { echo "docker build failed, retrying once in 15s" >&2; sleep 15; "$@"; }; }; retry docker build --platform linux/%s %s --tag "$EXPECTED_REF" -f "%s" "%s"
+                """ % (_controller_tilt_goarch, _mirror_build_args, _controller_profiles_dockerfile, _controller_profiles_context),
             ],
             deps=[_controller_profiles_dir, _controller_profiles_runbooks_dir, _controller_profiles_dockerfile],
         )
@@ -1212,8 +1219,8 @@ _controller_build_script = """
       cp hack/Dockerfile.controller.tilt "${tmp_dir}/Dockerfile"
       mkdir -p "${tmp_dir}/bin"
       cp bin/controller "${tmp_dir}/bin/controller"
-      retry() { "$@" || { echo "docker build failed, retrying once in 15s" >&2; sleep 15; "$@"; }; }; retry docker build --platform linux/%s --tag "$EXPECTED_REF" "${tmp_dir}"
-""" % (_controller_tilt_goarch, _controller_tilt_goarch)
+      retry() { "$@" || { echo "docker build failed, retrying once in 15s" >&2; sleep 15; "$@"; }; }; retry docker build --platform linux/%s %s --tag "$EXPECTED_REF" "${tmp_dir}"
+""" % (_controller_tilt_goarch, _controller_tilt_goarch, _mirror_build_args)
 
 if not _controller_profiles_image_enabled:
     _controller_build_script = """
@@ -1238,8 +1245,8 @@ if not _controller_profiles_image_enabled:
       cp bin/controller "${tmp_dir}/bin/controller"
       mkdir -p "${tmp_dir}/profiles"
       cp -a "%s/." "${tmp_dir}/profiles/"
-      retry() { "$@" || { echo "docker build failed, retrying once in 15s" >&2; sleep 15; "$@"; }; }; retry docker build --platform linux/%s --tag "$EXPECTED_REF" "${tmp_dir}"
-""" % (_controller_tilt_goarch, _controller_profiles_dir, _controller_tilt_goarch)
+      retry() { "$@" || { echo "docker build failed, retrying once in 15s" >&2; sleep 15; "$@"; }; }; retry docker build --platform linux/%s %s --tag "$EXPECTED_REF" "${tmp_dir}"
+""" % (_controller_tilt_goarch, _controller_profiles_dir, _controller_tilt_goarch, _mirror_build_args)
 
 if not CONTROLLER_IMAGE and not _controller_local_debug_active:
     local_resource(
