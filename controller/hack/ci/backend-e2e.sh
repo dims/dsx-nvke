@@ -212,25 +212,6 @@ curl_with_retry() {
   fi
 }
 
-# The same 404 fails a build while it loads a base image, and a Go proxy stream
-# reset fails it mid-module-download, past where GOPROXY's |direct fallback
-# applies; a second build gets both.
-build_with_retry() {
-  local out attempt rc
-  out=$(mktemp)
-  for attempt in 1 2; do
-    rc=0
-    docker build "$@" 2>&1 | tee "${out}" || rc=$?
-    if ((rc == 0 || attempt == 2)) ||
-      ! grep -q -E 'could not fetch content descriptor|proxy\.golang\.org.*(stream error|unexpected EOF|connection reset)' "${out}"; then
-      rm -f "${out}"
-      return "${rc}"
-    fi
-    log "docker build hit a transient fetch error, retrying in 15s"
-    sleep 15
-  done
-}
-
 runner_exec() {
   docker exec \
     -e KUBECONFIG=/state/management.kubeconfig \

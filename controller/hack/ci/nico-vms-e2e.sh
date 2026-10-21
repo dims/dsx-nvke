@@ -550,16 +550,17 @@ NVKE_CONTROLLER_BUILD_VERSION="e2e-${git_short_sha}"
 NVKE_CONTROLLER_PROFILES_TILT_IMAGE="docker.local/cwe-profiles:tilt"
 
 # Both host builds pull their bases through the mirror; see dockerhub_build_args.
+# build_with_retry (backend-e2e-lib.sh) retries the mirror's 404s and 429s.
 log "building the profiles fixture image ${NVKE_CONTROLLER_PROFILES_TILT_IMAGE}"
 mapfile -t profiles_build_args < <(dockerhub_build_args test/fixtures/Dockerfile)
-docker build --platform "linux/${host_arch}" "${profiles_build_args[@]}" \
+build_with_retry --platform "linux/${host_arch}" "${profiles_build_args[@]}" \
   --file test/fixtures/Dockerfile --tag "${NVKE_CONTROLLER_PROFILES_TILT_IMAGE}" test/fixtures \
   >"${STATE_DIR}/profiles-image-build.log" 2>&1 ||
   { tail -n 40 "${STATE_DIR}/profiles-image-build.log" >&2; fail "building the profiles image failed"; }
 
 log "building the controller image ${NVKE_CONTROLLER_IMAGE}"
 mapfile -t cwe_build_args < <(dockerhub_build_args "${CONTROLLER_ROOT}/Dockerfile")
-DOCKER_BUILDKIT=1 docker build --platform "linux/${host_arch}" "${cwe_build_args[@]}" \
+DOCKER_BUILDKIT=1 build_with_retry --platform "linux/${host_arch}" "${cwe_build_args[@]}" \
   --file "${CONTROLLER_ROOT}/Dockerfile" \
   --build-arg "BUILD_VERSION=${NVKE_CONTROLLER_BUILD_VERSION}" \
   --build-arg "GIT_VERSION=${git_sha}" \

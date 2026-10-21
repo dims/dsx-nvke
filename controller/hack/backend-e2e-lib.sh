@@ -68,19 +68,46 @@ e2e_note() {
   fi >&2
 }
 
-# The Docker Hub mirror sometimes 404s a blob it has not cached yet; a second pull
-# gets it. Progress goes to stdout and retries to stderr, so a caller capturing
-# its own output can send this to stderr or /dev/null.
+# The Docker Hub mirror sometimes 404s a blob it has not cached yet, and it
+# answers 429 for minutes when the runners' shared address pulls too much at
+# once (a merge's push set plus a few mirror sets starting together); a later
+# pull gets it. Five attempts, 15 s to 120 s apart, wait out about four minutes.
+# Progress goes to stdout and retries to stderr, so a caller capturing its own
+# output can send this to stderr or /dev/null.
+RETRY_ATTEMPTS=5
+retry_delay() { echo $((15 * (1 << ($1 - 1)))); }
+
 pull_with_retry() {
   local image=$1 attempt
-  for attempt in 1 2 3; do
+  for attempt in $(seq 1 "${RETRY_ATTEMPTS}"); do
     bounded "${DOCKER_PULL_TIMEOUT}" docker pull "${image}" && return 0
-    if ((attempt == 3)); then
+    if ((attempt == RETRY_ATTEMPTS)); then
       e2e_note "docker pull failed after ${attempt} attempts: ${image}"
       return 1
     fi
-    e2e_note "docker pull attempt ${attempt} failed, retrying: ${image}"
-    sleep 15
+    e2e_note "docker pull attempt ${attempt}/${RETRY_ATTEMPTS} failed, retrying in $(retry_delay "${attempt}")s: ${image}"
+    sleep "$(retry_delay "${attempt}")"
+  done
+}
+
+# A build fails the same way when it loads a base image through the mirror (the
+# 404 or 429 above) or when a Go proxy stream resets mid-download, past where
+# GOPROXY's |direct fallback applies; the next build gets what the last one did
+# not. Output goes to stdout as docker build's would, so a caller's redirection
+# still captures it.
+build_with_retry() {
+  local out attempt rc
+  out=$(mktemp)
+  for attempt in $(seq 1 "${RETRY_ATTEMPTS}"); do
+    rc=0
+    docker build "$@" 2>&1 | tee "${out}" || rc=$?
+    if ((rc == 0 || attempt == RETRY_ATTEMPTS)) ||
+      ! grep -q -E 'could not fetch content descriptor|429 Too Many Requests|httpReadSeeker: failed open|proxy\.golang\.org.*(stream error|unexpected EOF|connection reset)' "${out}"; then
+      rm -f "${out}"
+      return "${rc}"
+    fi
+    e2e_note "docker build hit a transient fetch error (attempt ${attempt}/${RETRY_ATTEMPTS}), retrying in $(retry_delay "${attempt}")s"
+    sleep "$(retry_delay "${attempt}")"
   done
 }
 

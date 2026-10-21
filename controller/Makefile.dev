@@ -490,6 +490,8 @@ bundle-mirror-down: ## Remove the CAPD bundle mirror and its volume
 
 .PHONY: registry-mirror
 registry-mirror: ## Start Docker Hub and registry.k8s.io pull-through caches
+	@$(kind-docker-host) bash -c '. hack/backend-e2e-lib.sh; \
+		docker image inspect $(REGISTRY_MIRROR_IMAGE) >/dev/null 2>&1 || pull_with_retry $(REGISTRY_MIRROR_IMAGE) >/dev/null'
 	@if $(kind-docker-host) docker inspect registry-mirror >/dev/null 2>&1; then \
 		if [ "$$($(kind-docker-host) docker inspect --format '{{.State.Running}}' registry-mirror)" = "true" ]; then \
 			echo "✅ Registry mirror already running"; \
