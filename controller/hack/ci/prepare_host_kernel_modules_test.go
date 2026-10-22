@@ -100,3 +100,56 @@ func TestHostKernelArchiveSuite(t *testing.T) {
 		})
 	}
 }
+
+func TestHostKernelArchives(t *testing.T) {
+	tests := []struct {
+		name         string
+		architecture string
+		configured   string
+		want         string
+		wantError    bool
+	}{
+		{
+			name:         "the runner's mirror comes before the public archive",
+			architecture: "amd64",
+			configured:   "http://us-east-2.ec2.archive.ubuntu.com/ubuntu/\nhttp://security.ubuntu.com/ubuntu/\n",
+			want:         "http://us-east-2.ec2.archive.ubuntu.com/ubuntu\nhttp://archive.ubuntu.com/ubuntu\n",
+		},
+		{
+			name:         "arm64 keeps ports mirrors only",
+			architecture: "arm64",
+			configured:   "http://us-east-2.ec2.archive.ubuntu.com/ubuntu/\nhttp://us-east-2.ec2.ports.ubuntu.com/ubuntu-ports/\n",
+			want:         "http://us-east-2.ec2.ports.ubuntu.com/ubuntu-ports\nhttp://ports.ubuntu.com/ubuntu-ports\n",
+		},
+		{
+			name:         "no configured mirror leaves the public archive",
+			architecture: "amd64",
+			want:         "http://archive.ubuntu.com/ubuntu\n",
+		},
+		{
+			name:         "the public archive is listed once and other repositories are skipped",
+			architecture: "amd64",
+			configured:   "http://archive.ubuntu.com/ubuntu/\nhttps://apt.releases.teleport.dev/ubuntu/\nhttps://ppa.launchpadcontent.net/example/ppa/ubuntu/\n",
+			want:         "http://archive.ubuntu.com/ubuntu\n",
+		},
+		{
+			name:         "unsupported architecture fails closed",
+			architecture: "riscv64",
+			wantError:    true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := exec.CommandContext(t.Context(), "bash", "-c",
+				`source ./prepare-host-kernel-modules.sh; host_kernel_archives "$1" "$2"`,
+				"--", tt.architecture, tt.configured)
+			output, err := cmd.CombinedOutput()
+			if tt.wantError {
+				require.Error(t, err, string(output))
+				return
+			}
+			require.NoError(t, err, string(output))
+			assert.Equal(t, tt.want, string(output))
+		})
+	}
+}

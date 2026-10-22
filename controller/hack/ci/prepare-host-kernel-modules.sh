@@ -32,9 +32,31 @@ host_kernel_archive_suite() {
   esac
 }
 
+# The runner image's own APT sources name the Ubuntu mirror nearest to it (an
+# EC2 image reads us-east-2.ec2.archive.ubuntu.com); the public archive is the
+# fallback and carries the same suites. Prints one archive per line, nearest
+# first. The second argument is the configured repository URIs, one per line;
+# only hosts under archive.ubuntu.com or ports.ubuntu.com count as mirrors.
+host_kernel_archives() {
+  local architecture="$1" configured="$2" public path uri
+  case "${architecture}" in
+    arm64) public=http://ports.ubuntu.com/ubuntu-ports ;;
+    amd64) public=http://archive.ubuntu.com/ubuntu ;;
+    *) echo "unsupported runner architecture ${architecture}" >&2; return 1 ;;
+  esac
+  path="${public##*/}"
+  while read -r uri; do
+    uri="${uri%/}"
+    if [[ "${uri}" =~ ^https?://([a-z0-9-]+\.)*(archive|ports)\.ubuntu\.com/${path}$ && "${uri}" != "${public}" ]]; then
+      printf '%s\n' "${uri}"
+    fi
+  done <<< "${configured}"
+  printf '%s\n' "${public}"
+}
+
 prepare_host_kernel_modules() (
   set -euo pipefail
-  local destination="$1" release signature version suite archive task_tmp deb
+  local destination="$1" release signature version suite archives archive fetched task_tmp deb
   local ID VERSION_CODENAME
   if [[ "${destination}" != /* || -e "${destination}" ]]; then
     echo "module staging directory must be a new absolute path" >&2
@@ -48,11 +70,10 @@ prepare_host_kernel_modules() (
   source /etc/os-release
   [[ "${ID}" == ubuntu && -n "${VERSION_CODENAME}" ]]
   suite="$(host_kernel_archive_suite "${version}" "${VERSION_CODENAME}")"
-  case "$(dpkg --print-architecture)" in
-    arm64) archive=http://ports.ubuntu.com/ubuntu-ports ;;
-    amd64) archive=http://archive.ubuntu.com/ubuntu ;;
-    *) echo "unsupported runner architecture" >&2; exit 1 ;;
-  esac
+  # shellcheck disable=SC2016 # apt expands $(REPO_URI) itself
+  mapfile -t archives < <(host_kernel_archives "$(dpkg --print-architecture)" \
+    "$(apt-get indextargets --format '$(REPO_URI)' 2>/dev/null | awk '!seen[$0]++')")
+  [[ ${#archives[@]} -gt 0 ]]
   [[ -r /usr/share/keyrings/ubuntu-archive-keyring.gpg ]]
   printf 'host kernel signature: %s\nmodule package version: %s (%s)\n' "${signature}" "${version}" "${suite}"
 
@@ -63,9 +84,6 @@ prepare_host_kernel_modules() (
   chmod 0755 "${task_tmp}"
   mkdir -p "${task_tmp}/lists/partial" "${task_tmp}/debs"
   chown _apt "${task_tmp}/debs"
-  for pocket in "${suite}" "${suite}-updates" "${suite}-security"; do
-    printf 'deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] %s %s main\n' "${archive}" "${pocket}"
-  done > "${task_tmp}/sources.list"
   local apt_options=(
     -o "Dir::Etc::sourcelist=${task_tmp}/sources.list"
     -o Dir::Etc::sourceparts=-
@@ -73,10 +91,25 @@ prepare_host_kernel_modules() (
     -o Acquire::http::Timeout=30
     -o Acquire::Retries=2
   )
-  apt-get "${apt_options[@]}" -o APT::Update::Error-Mode=any update -qq
+  # A mirror can carry a fresh index and still lag the exact package build, so
+  # the fallback covers the download as well as the index update.
+  fetched=false
+  for archive in "${archives[@]}"; do
+    for pocket in "${suite}" "${suite}-updates" "${suite}-security"; do
+      printf 'deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] %s %s main\n' "${archive}" "${pocket}"
+    done > "${task_tmp}/sources.list"
+    if apt-get "${apt_options[@]}" -o APT::Update::Error-Mode=any update -qq \
+      && (cd "${task_tmp}/debs" && apt-get "${apt_options[@]}" download \
+        "linux-modules-${release}=${version}" "linux-modules-extra-${release}=${version}"); then
+      fetched=true
+      break
+    fi
+    echo "${archive} did not serve the module packages; trying the next archive" >&2
+    rm -f "${task_tmp}/debs"/*.deb
+  done
+  [[ "${fetched}" == true ]]
+  printf 'module archive: %s\n' "${archive}"
   cd "${task_tmp}/debs"
-  apt-get "${apt_options[@]}" download \
-    "linux-modules-${release}=${version}" "linux-modules-extra-${release}=${version}"
   mkdir -p "${destination}"
   for deb in ./*.deb; do
     dpkg-deb -f "${deb}" Package Version Architecture
