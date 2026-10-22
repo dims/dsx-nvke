@@ -62,17 +62,19 @@ fetch() {
 }
 
 # try_retry <what> <cmd...> retries a command but lets the caller choose a
-# fallback after the final failure.
+# fallback after the final failure. The pauses are TRY_RETRY_DELAY seconds
+# (default 5) and twice that; a caller waiting out an archive outage sets it
+# higher.
 try_retry() {
   local what="$1"; shift
-  local attempt
+  local attempt delay="${TRY_RETRY_DELAY:-5}"
   for attempt in 1 2 3; do
     if "$@"; then
       return 0
     fi
     if [[ "$attempt" -lt 3 ]]; then
-      echo "${CNI}: ${what} failed, attempt ${attempt} of 3; retrying in $((attempt * 5))s" >&2
-      sleep $((attempt * 5))
+      echo "${CNI}: ${what} failed, attempt ${attempt} of 3; retrying in $((attempt * delay))s" >&2
+      sleep $((attempt * delay))
     fi
   done
   return 1
@@ -368,7 +370,10 @@ repack_archive() {
 # ready for repack_archive. For packages whose image has no registry to pull
 # from. Timestamps are pinned to a fixed epoch so two builds of the same inputs
 # produce the same layers. Needs docker with buildx, nerdctl or podman (OCI_BIN picks
-# the binary). A foreign ARCH builds under emulation.
+# the binary). A foreign ARCH builds under emulation. The build gets three
+# attempts a minute and then two minutes apart: its apt layers fetch from the
+# Ubuntu archive at build time, and a mirror mid-sync or a connect failure
+# there clears within minutes; a retry redoes only the layer that failed.
 build_image() {
   local ctx="$1" dockerfile="$2" ref="$3"; shift 3
   local oci="${OCI_BIN:-docker}" epoch=1767225600
@@ -387,19 +392,21 @@ build_image() {
     case "$(basename "$oci")" in
       podman)
         # --timestamp pins every timestamp; podman refuses it beside SOURCE_DATE_EPOCH.
-        env -u SOURCE_DATE_EPOCH "$oci" build --platform "linux/${ARCH}" --timestamp "$epoch" \
+        TRY_RETRY_DELAY=60 try_retry "building ${ref}" \
+          env -u SOURCE_DATE_EPOCH "$oci" build --platform "linux/${ARCH}" --timestamp "$epoch" \
           "$@" -t "$ref" -f "$dockerfile" "$ctx" ||
-          die "building ${ref} failed"
+          die "building ${ref} failed after 3 attempts"
         "$oci" save --format docker-archive -o "${WORK}/images.tar" "$ref" || die "saving ${ref} failed"
         "$oci" rmi "$ref" >/dev/null 2>&1 || true
         ;;
       nerdctl)
         # nerdctl has no buildx; its build drives buildkit, which has the same exporter.
-        SOURCE_DATE_EPOCH="$epoch" "$oci" build \
+        TRY_RETRY_DELAY=60 try_retry "building ${ref}" \
+          env SOURCE_DATE_EPOCH="$epoch" "$oci" build \
           --platform "linux/${ARCH}" --build-arg "SOURCE_DATE_EPOCH=${epoch}" "$@" \
           --output "type=docker,dest=${WORK}/images.tar,rewrite-timestamp=true" \
           -t "$ref" -f "$dockerfile" "$ctx" ||
-          die "building ${ref} failed"
+          die "building ${ref} failed after 3 attempts"
         ;;
       *)
         # The default docker driver cannot export an archive. Use a docker-container
@@ -411,11 +418,12 @@ build_image() {
             die "creating a docker-container buildx builder failed"
           builder=(--builder nvke-oci-archive)
         fi
-        SOURCE_DATE_EPOCH="$epoch" "$oci" buildx build ${builder[@]+"${builder[@]}"} \
+        TRY_RETRY_DELAY=60 try_retry "building ${ref}" \
+          env SOURCE_DATE_EPOCH="$epoch" "$oci" buildx build ${builder[@]+"${builder[@]}"} \
           --platform "linux/${ARCH}" --build-arg "SOURCE_DATE_EPOCH=${epoch}" "$@" \
           --output "type=docker,dest=${WORK}/images.tar,rewrite-timestamp=true" \
           -t "$ref" -f "$dockerfile" "$ctx" ||
-          die "building ${ref} failed"
+          die "building ${ref} failed after 3 attempts"
         ;;
     esac
     mkdir -p "${DIST}/image-cache"
