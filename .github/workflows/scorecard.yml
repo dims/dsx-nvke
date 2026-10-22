@@ -83,7 +83,20 @@ jobs:
         with:
           persist-credentials: false
 
+      # Each analysis gets one more attempt: the action's first GraphQL query
+      # sometimes gets a GitHub-side "Something went wrong" (three main pushes on
+      # 2026-10-22), and a retry seconds later succeeds.
       - name: Run analysis
+        id: analysis
+        continue-on-error: true
+        uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: false
+
+      - name: Run analysis again
+        if: steps.analysis.outcome == 'failure'
         uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
         with:
           results_file: results.sarif
@@ -94,6 +107,16 @@ jobs:
       # and drops inconclusive checks, so per-check scores do not survive it.
       # The JSON result is the document the OpenSSF API serves.
       - name: Write the JSON result
+        id: json
+        continue-on-error: true
+        uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: results.json
+          results_format: json
+          publish_results: false
+
+      - name: Write the JSON result again
+        if: steps.json.outcome == 'failure'
         uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
         with:
           results_file: results.json
