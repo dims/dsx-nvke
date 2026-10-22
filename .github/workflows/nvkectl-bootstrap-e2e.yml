@@ -343,19 +343,37 @@ jobs:
       # from there, so a Docker-built one would be invisible to it.
       # The base images come through the mirror too: configureDockerHubMirror
       # covers the bootstrap cluster's node, not this host's containerd.
+      # The mirror sometimes serves a manifest whose blob it has not cached yet
+      # (a 404) and answers 429 when a push set's builds all start at once; a
+      # later pull gets it, so those errors get five attempts, 15 s to 120 s
+      # apart. Any other failure stops at the first.
       - name: Build controller image
         shell: bash
         run: |
           source controller/hack/backend-e2e-lib.sh
           mapfile -t mirror_args < <(dockerhub_build_args controller/Dockerfile)
-          sudo -E env "PATH=$PATH" nerdctl build \
-            --file controller/Dockerfile \
-            --platform "linux/${{ matrix.arch }}" \
-            --tag "${NVKE_CONTROLLER_IMAGE}" \
-            --build-arg "BUILD_VERSION=nvkectl-bootstrap-e2e" \
-            --build-arg "GIT_VERSION=${GITHUB_SHA}" \
-            "${mirror_args[@]}" \
-            .
+          build() {
+            sudo -E env "PATH=$PATH" nerdctl build \
+              --file controller/Dockerfile \
+              --platform "linux/${{ matrix.arch }}" \
+              --tag "${NVKE_CONTROLLER_IMAGE}" \
+              --build-arg "BUILD_VERSION=nvkectl-bootstrap-e2e" \
+              --build-arg "GIT_VERSION=${GITHUB_SHA}" \
+              "${mirror_args[@]}" \
+              .
+          }
+          out="$(mktemp)"
+          for attempt in 1 2 3 4 5; do
+            rc=0
+            build 2>&1 | tee "${out}" || rc=$?
+            if ((rc == 0 || attempt == 5)) ||
+              ! grep -q -E 'could not fetch content descriptor|429 Too Many Requests|httpReadSeeker: failed open' "${out}"; then
+              exit "${rc}"
+            fi
+            delay=$((15 * (1 << (attempt - 1))))
+            echo "::warning::nerdctl build hit a transient registry error (attempt ${attempt} of 5); retrying in ${delay}s"
+            sleep "${delay}"
+          done
 
       # Built as the ordinary runner user: building ahead of run.sh keeps
       # `sudo -E` scoped to the part of the run that touches kind and nerdctl.
