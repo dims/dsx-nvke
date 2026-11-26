@@ -27,7 +27,7 @@ type controlPlane struct {
 }
 
 func (r *reconciler) controlPlaneReplacementBlocked(cluster db.Cluster) bool {
-	return !r.cfg.AllowControlPlaneWithoutVIP && strings.TrimSpace(cluster.ControlPlaneVIP) == ""
+	return !r.cfg.AllowControlPlaneWithoutVIP && !cluster.HasStableControlPlaneEndpoint()
 }
 
 // readControlPlane reads the control plane from the database.

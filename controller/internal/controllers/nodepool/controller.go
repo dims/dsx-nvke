@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -189,7 +188,7 @@ func (a *Controller) reconcileNodePool(ctx context.Context, tx db.Tx, nodePool d
 	// Only surge when there are deprecated nodes to migrate, enabling faster rollout
 	// Cap surge to the number of deprecated nodes (no point surging more than what we're migrating)
 	surgeNodes := min(nodePool.MaxSurge, nodesInNonCurrentNodeSets)
-	if !a.cfg.AllowControlPlaneWithoutVIP && nodePool.ControlPlane && surgeNodes > 0 && strings.TrimSpace(cluster.ControlPlaneVIP) == "" {
+	if !a.cfg.AllowControlPlaneWithoutVIP && nodePool.ControlPlane && surgeNodes > 0 && !cluster.HasStableControlPlaneEndpoint() {
 		logger.Warn("Skipping control-plane surge because controlPlaneVIP is not configured")
 		surgeNodes = 0
 	}
@@ -266,7 +265,7 @@ func (a *Controller) applyNewNodeSet(
 	cluster db.Cluster, nodePool db.NodePool, prevNodeSet db.NodeSet, newNodeSet *db.NodeSet,
 	logger *slog.Logger,
 ) (db.NodePool, db.NodeSet, error) {
-	if !a.cfg.AllowControlPlaneWithoutVIP && nodePool.ControlPlane && nodePool.CurrentNodeSetID != nil && strings.TrimSpace(cluster.ControlPlaneVIP) == "" {
+	if !a.cfg.AllowControlPlaneWithoutVIP && nodePool.ControlPlane && nodePool.CurrentNodeSetID != nil && !cluster.HasStableControlPlaneEndpoint() {
 		logger.Warn("Skipping control-plane NodeSet replacement because controlPlaneVIP is not configured")
 		return nodePool, prevNodeSet, nil
 	}

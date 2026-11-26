@@ -451,7 +451,10 @@ func (s *clusterService) ValidateCreateClusterRequestFields(req *api.CreateClust
 	}); err != nil {
 		return fmt.Errorf("controlPlaneConfig: %w", err)
 	}
-	if err := s.validateControlPlaneCapacityChange(req.ControlPlaneVIP, 0, req.ControlPlaneConfig.DesiredCount); err != nil {
+	// The cluster row does not exist yet, so ask the endpoint question of the
+	// endpoint fields the request would store.
+	requested := db.Cluster{ControlPlaneVIP: req.ControlPlaneVIP}
+	if err := s.validateControlPlaneCapacityChange(&requested, 0, req.ControlPlaneConfig.DesiredCount); err != nil {
 		return err
 	}
 
@@ -697,7 +700,7 @@ func (s *clusterService) UpdateCluster(ctx context.Context, req api.UpdateCluste
 			if err := ValidateKubernetesVersionSkewWithControlPlane(dbCluster.KubernetesVersion, *req.Body.ControlPlaneKubernetesVersion); err != nil {
 				return err
 			}
-			if err := s.validateControlPlaneUpgrade(dbCluster.ControlPlaneVIP); err != nil {
+			if err := s.validateControlPlaneUpgrade(&dbCluster); err != nil {
 				return err
 			}
 
@@ -985,7 +988,7 @@ func (s *clusterService) applyClusterControlPlaneConfigUpdate(ctx context.Contex
 		}
 	}
 	if err := s.validateControlPlaneRollout(
-		cluster.ControlPlaneVIP,
+		cluster,
 		db.IsControlPlaneRolloutRequired(cluster.ControlPlaneConfig.ControlPlaneConfigSpec, controlPlaneConfigSpec),
 	); err != nil {
 		return err
@@ -1048,7 +1051,7 @@ func (s *clusterService) applyClusterLevelControlPlaneSpecUpdate(
 			return newBadRequestErrorf("controlPlaneConfig.desiredCount must be at least 1")
 		}
 		if err := s.validateControlPlaneCapacityChange(
-			cluster.ControlPlaneVIP,
+			cluster,
 			cluster.ControlPlaneConfig.DesiredCount,
 			*req.DesiredCount,
 		); err != nil {

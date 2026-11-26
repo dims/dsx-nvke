@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 
@@ -87,7 +86,7 @@ func guardLiveNodeDelete(ctx context.Context, tx db.Tx, nodeID uuid.UUID, allowW
 		if db.ControlPlaneMutationBlocked(cluster) {
 			return db.Node{}, db.ErrControlPlaneMutationBlocked
 		}
-		if !allowWithoutVIP && strings.TrimSpace(cluster.ControlPlaneVIP) == "" {
+		if !allowWithoutVIP && !cluster.HasStableControlPlaneEndpoint() {
 			return db.Node{}, ErrControlPlaneVIPRequired
 		}
 		if err := ensureSurvivingJoinedControlPlane(ctx, tx, dbNode.ClusterID, liveControlPlaneDeleteExclusion{
