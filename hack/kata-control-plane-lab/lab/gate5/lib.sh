@@ -273,8 +273,8 @@ compare() {
   out="$OUT/compare-$1-$2.txt"
   {
     say "compare the state $1 and the state $2"
-    if diff <(awk -v re="$allow" '{split($2,x,"="); if (x[1] !~ re) print}' "$a") \
-      <(awk -v re="$allow" '{split($2,x,"="); if (x[1] !~ re) print}' "$b") >"$OUT/.diff"; then
+    if diff <(RE="$allow" awk '{split($2,x,"="); if (x[1] !~ ENVIRON["RE"]) print}' "$a") \
+      <(RE="$allow" awk '{split($2,x,"="); if (x[1] !~ ENVIRON["RE"]) print}' "$b") >"$OUT/.diff"; then
       echo "no difference in $(grep -c . "$a") values"
     else
       echo "FAIL: values differ (< before, > after):"
@@ -470,7 +470,7 @@ ensure_class() {
 # restarts containerd, so no Kata pod may run. In daemonset mode the pod of the DaemonSet does
 # the cleanup when it stops, after helm returns, so wait until it is gone.
 kata_uninstall() {
-  local x rc
+  local x rc dspod
   say "action: helm uninstall $HELM_RELEASE (it removes /opt/kata and the kata-deploy handlers, and it restarts containerd)"
   [ -z "$(n crictl pods -q --namespace "$NS" --state ready)" ] || die "node pods still run. Stop them first."
   x=$(k get pods -A -o jsonpath='{range .items[?(@.spec.runtimeClassName)]}{.metadata.namespace}{"/"}{.metadata.name}{" "}{.spec.runtimeClassName}{"\n"}{end}' | grep kata || true)
@@ -478,19 +478,30 @@ kata_uninstall() {
     echo "$x"
     [ "${ALLOW_OTHER_KATA_PODS:-0}" = 1 ] || die "other Kata pods run on the node, and the uninstall stops them. Set ALLOW_OTHER_KATA_PODS=1 only when their owner agrees."
   fi
+  # The pods that do the cleanup go away at the end of the uninstall (the pod of the DaemonSet,
+  # or the pods of the cleanup Job), and their logs go with them. A unit of the node follows
+  # the log of each kata-deploy container.
+  dspod=$(k -n "$HELM_NS" get pods -l name=kata-deploy -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  n mkdir -p "$ND/kdlogs"
+  node_put "$WORK/node/kd-follow.sh" "$ND/kd-follow.sh"
+  node_unit g5-kdlogs bash "$ND/kd-follow.sh" "$ND/kdlogs" || echo "WARNING: cannot follow the kata-deploy logs"
   stamp uninstall-start
   helm_k uninstall "$HELM_RELEASE" --timeout 15m >"$OUT/helm-uninstall.log" 2>&1
   rc=$?
   cat "$OUT/helm-uninstall.log"
   kata_deploy_logs after-uninstall
-  [ "$rc" = 0 ] || die "helm uninstall gave exit code $rc"
+  [ "$rc" = 0 ] || echo "FAIL: helm uninstall gave exit code $rc"
   # "kubectl wait" with a selector gives an error when nothing matches, so look first.
   if k -n "$HELM_NS" get pods -l name=kata-deploy --no-headers 2>/dev/null | grep -q .; then
-    k -n "$HELM_NS" wait --for=delete pod -l name=kata-deploy --timeout=900s || die "a pod of the DaemonSet did not go away"
+    k -n "$HELM_NS" wait --for=delete pod -l name=kata-deploy --timeout=900s || echo "FAIL: a pod of the DaemonSet did not go away"
   fi
-  if k -n "$HELM_NS" get jobs -l app.kubernetes.io/instance="$HELM_RELEASE" --no-headers 2>/dev/null | grep -q .; then
-    k -n "$HELM_NS" wait --for=delete job -l app.kubernetes.io/instance="$HELM_RELEASE" --timeout=900s || true
-  fi
+  sleep 2
+  n systemctl stop g5-kdlogs.service 2>/dev/null || true
+  mkdir -p "$OUT/kata-deploy-after-uninstall/followed"
+  n tar -C "$ND/kdlogs" -cf - . 2>/dev/null | tar -xf - -C "$OUT/kata-deploy-after-uninstall/followed" 2>/dev/null || true
+  say "logs that the unit g5-kdlogs followed during the uninstall: $(find "$OUT/kata-deploy-after-uninstall/followed" -type f | wc -l) files"
+  grep -h -E 'cleanup|Cleaning|Removing|removed|Restarting|restart|still selects|imports|deleting' "$OUT/kata-deploy-after-uninstall/followed"/*cleanup*.log "$OUT/kata-deploy-after-uninstall/followed/${dspod:-none}".*.log 2>/dev/null | cut -c1-240 | head -40
+  [ "$rc" = 0 ] || die "helm uninstall failed"
   stamp uninstall-done
   echo "after the uninstall: containerd $(n systemctl is-active containerd), /opt/kata has $(n find /opt/kata -mindepth 1 2>/dev/null | wc -l) entries, node label kata-runtime: [$(k get node "$NODE" -o jsonpath='{.metadata.labels.katacontainers\.io/kata-runtime}')]"
 }
@@ -500,6 +511,12 @@ kata_install() {
   local version=$1 mode=$2 rc
   # shellcheck disable=SC2046
   set -- $(chart_ref "$version")
+  # A finished per-node install Job of an earlier run lives for 600 s. The dispatcher of a new
+  # install in job mode must make its own Job, so wait until the old one is gone.
+  if [ "$mode" = job ] && k -n "$HELM_NS" get jobs -l kata-deploy/stage=install --no-headers 2>/dev/null | grep -q .; then
+    say "a per-node install Job of an earlier run is present. Wait until it is gone (at most 660 s)."
+    k -n "$HELM_NS" wait --for=delete job -l kata-deploy/stage=install --timeout=660s || die "the old Job did not go away"
+  fi
   say "action: helm install $HELM_RELEASE $* -f $VALUES --set deploymentMode=$mode"
   stamp install-start
   helm_k install "$HELM_RELEASE" "$@" -f "$VALUES" --set "deploymentMode=$mode" --timeout 20m >"$OUT/helm-install.log" 2>&1

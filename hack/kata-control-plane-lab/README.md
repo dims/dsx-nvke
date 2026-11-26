@@ -12,9 +12,9 @@ It is a lab record, not product code. No build and no CI job uses it.
 | 2. etcd sync time on a raw block volume | Pass |
 | 3. The agent gets its identity in a Kata pod | Pass with a join token and with a service account token. The host socket fails with Cloud Hypervisor |
 | 4. A LoadBalancer IP as the node address, with recovery after a cold start and a machine restart | Pass |
-| 5. Running pods continue through a restart of containerd, the kubelet and Kata on the host | In work |
+| 5. Running pods continue through a restart of containerd, the kubelet and Kata on the host, and through a Kata upgrade | Pass |
 
-Start with `results/phase0-results.md`. It has the gate table, the numbers, each defect with its fix, and what the lab cannot answer.
+Phase 0 is complete. Start with `results/phase0-results.md`. It has the gate table, the recommendation, the numbers, each defect with its fix, and what the lab cannot answer.
 
 ## Content
 
@@ -26,7 +26,7 @@ Start with `results/phase0-results.md`. It has the gate table, the numbers, each
 | `lab/gate2/` | The etcd disk test and the load with fake nodes |
 | `lab/gate3/` | The host socket test and the service account token test for SPIRE |
 | `lab/gate4/` | Three replicas with a LoadBalancer IP as the node address, the pod replace, the cold start, and the machine restart test in a VM (`vm-restart/`) |
-| `lab/gate5/` | The restart tests of containerd, the kubelet and `kata-deploy` |
+| `lab/gate5/` | The restart tests of containerd, the kubelet and `kata-deploy`, and the upgrade from Kata 4.3.1 to 4.4.0 |
 | `lab/patches/` | Two patches to the Kata agent. The same commits are on the branch `lab/agent-kill-child-cgroups` of `github.com/dims/kata-containers` |
 | `results/` | The results of phase 0 and the source readings |
 

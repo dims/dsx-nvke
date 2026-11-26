@@ -1,8 +1,8 @@
 # Phase 0 results: NVKE control planes as Kata pods
 
-State: in work. Last update: 2026-11-26, 07:40. The plan is [nvke-control-planes-as-kata-pods.md](../nvke-control-planes-as-kata-pods.md). The method is in [PROMPT.md](../PROMPT.md). The dated log with each install and its removal is [runlog.md](../runlog.md).
+State: phase 0 is complete. All five gates have a result. Last update: 2026-11-26, 08:59. The plan is [nvke-control-planes-as-kata-pods.md](../nvke-control-planes-as-kata-pods.md). The method is in [PROMPT.md](../PROMPT.md). The dated log with each install and its removal is [runlog.md](../runlog.md).
 
-This file changes while the work continues. A line that says "not tested" or "in work" is not a result.
+A line that says "not tested" is not a result. Phase 1 waits for the word of Davanum.
 
 ## The five gates
 
@@ -12,9 +12,32 @@ This file changes while the work continues. A line that says "not tested" or "in
 | 2. etcd WAL sync below 10 ms at p99 on a raw block volume | Pass | One Kata node: p99 7.8 ms under the 756 node load in 3 of 3 runs. Kata is about 1.15 times runc for the mean. Three replicas on one disk are at 10.7 to 11.7 ms, and the evidence points to the shared disk |
 | 3. The agent gets its identity in a Kata pod | Pass with two paths: a join token, and a service account token. The host socket path fails with Cloud Hypervisor | `nvke-agent` in a Kata pod completes an authenticated call from a client that checks its SPIFFE ID. Each path has one limit |
 | 4. LoadBalancer IP as node address, and recovery after a cold start | Pass. Steps 3 to 6 on the kind node, and the machine restart in a VM in 10 of 10 restarts | Three replicas keep their identity through a pod replace, a cold start of the host cluster, a machine restart and a power loss. The design needs two etcd settings. The option that keeps the etcd peer check also passes, at the cost of a dependency on the DNS of the host cluster |
-| 5. Running pods continue through a containerd and Kata restart | Not tested as a gate. One containerd restart passed | Three running replicas kept their processes and guest boot IDs through one containerd restart |
+| 5. Running pods continue through a containerd and Kata restart | Pass. Four restart tests in 13 of 13 runs, and the upgrade from Kata 4.3.1 to 4.4.0 in 1 run | 0 failed calls in 10,906 through restarts of containerd, of the kubelet and of `kata-deploy` in both modes, and through the upgrade. No pod restart and no etcd leader change |
 
-Recommendation so far: continue with Kata pods. No gate failed. The work found three defects in Kata 4.4.0 for this use, and each one has a fix that is tested in the lab. The final recommendation comes when all gates have a result.
+## Recommendation
+
+Continue with Kata pods, and start phase 1 with the design below. No gate failed, and no gate passes only with a workaround that hides a problem.
+
+The design of record, as tested:
+
+- One control plane node is one privileged Kata pod with Cloud Hypervisor and the Rust runtime. The privilege stays in the guest. The pod has no host network, no `hostPath` volume and no host socket.
+- Each pod has two raw block volumes, one for `/var` and one for etcd, and it keeps `/etc/kubernetes` on a volume.
+- The node address of a replica is the LoadBalancer IP of its own Service, as a second address in the guest. etcd listens on `0.0.0.0` and has the flag `peer-skip-client-san-verification` (the choice of Davanum on 2026-11-26).
+- A StatefulSet with one replica owns each pod.
+- `nvke-agent` gets its identity from a SPIRE agent in the pod with a join token (the choice of Davanum for phase 1).
+- The Kata RuntimeClass has 512 Mi of overhead and direct I/O for block volumes, and the guest image has the two agent patches.
+
+What a site must carry until upstream has it:
+
+- Two source patches to the Kata agent (kill and exec for a container that runs systemd). One has an open upstream issue, the other an open upstream pull request.
+- Two Kata settings for the RuntimeClass (overhead, direct I/O).
+- In NVKE: the two etcd settings, an endpoint mode with no kube-vip, and the other changes of `lab/gate4/report.md`, part 2.
+
+The main risks that the lab cannot remove:
+
+- A node that is absent for longer than the life of its SPIRE agent identity (1 hour by default) needs a new join token, and NVKE has no path for that. The service account token path repairs itself, but it permits one such pod for each host node and cluster name.
+- All tests ran on one machine, with the Kata hypervisor inside a kind node or with nested virtualization in a VM. A host cluster with more than one node, the real CNI and the real disks are not tested.
+- Three replicas on one disk are above the 10 ms limit of gate 2. Each replica needs its own disk, or a disk that is fast enough for three.
 
 ## The lab
 
@@ -229,11 +252,26 @@ Machine restart. A copy of the lab ran in one Lima VM on the lab host (QEMU with
 
 ## Gate 5: running pods continue through a host runtime restart
 
-State: not tested as a gate.
+Report: `lab/gate5/report.md`. Scripts: `lab/gate5/`.
 
-One result exists from the install of the extra Kata handlers. The containerd of the kind node restarted one time while three replicas ran. containerd was back in less than 0.4 s. The three replicas kept their shim, virtiofsd and Cloud Hypervisor processes, their pod IPs and their guest boot IDs. A loop on the shared API address had 0 failed calls in 124, with a longest gap of 1.03 s.
+| Test | State | Result |
+|---|---|---|
+| Restart of containerd in the kind node | Pass, 3 of 3 | 0 failed calls. containerd is down for less than 0.2 s |
+| Restart of the kubelet in the kind node | Pass, 3 of 3 | 0 failed calls. The pods stay ready |
+| `kata-deploy` in job mode, the install run again | Pass, 3 of 3, and 1 run with a forced containerd restart | 0 failed calls. The installer writes 85 of 86 files of `/opt/kata` again and restarts containerd only when its configuration changed |
+| `kata-deploy` in DaemonSet mode, rollout restart | Pass, 3 of 3 | 0 failed calls. Each new pod writes the files again and restarts containerd one time |
+| Upgrade from Kata 4.3.1 to 4.4.0, with the replicas on 4.3.1 guests | Pass, 1 of 1 full run | 0 failed calls in 956. The old guests continue on their old files. A containerd restart after it changes nothing (0 failed calls in 596). A replica made again on 4.4.0 returns as the same etcd member |
 
-Still to test: a kubelet restart, a restart of `kata-deploy` (the chart of 4.4.0 installs with a Job for each node by default, and a DaemonSet is an option), and the upgrade from Kata 4.3.1 to 4.4.0.
+- The subject is the three replica cluster of gate 4 on the class `kata-clh-runtime-rs-fix-direct`. A loop called `/readyz` of the shared address and of each replica each 0.5 s from the kind node, and a loop in each guest read the etcd leader and term each second.
+- In the 13 runs: 0 failed calls in 9,354. The longest time between two good calls was 0.557 s, against 0.521 to 0.534 s with no restart. No etcd leader or term change, no pod restart, the same guest boot IDs, and the same shim, virtiofsd and Cloud Hypervisor processes.
+- The running Kata processes keep their old program files when the installer replaces the files of `/opt/kata`.
+- The test of Kata issue 12761 (a rollout restart of the DaemonSet) passes. In 4.4.0 the old pod skips its cleanup while the DaemonSet still selects the node.
+- No `kata-deploy` action changed the folder `/opt/kata-fix`, its entry in the containerd `imports` line or the four extra handlers. So a site can carry the patched agent in its own handler and file next to the stock install.
+- An uninstall empties `/opt/kata` and restarts containerd. No Kata pod may run then. The chart refuses a change between job mode and DaemonSet mode for a release that exists, so a mode change is an uninstall and an install.
+- Upgrade: the installer replaces the files of `/opt/kata`, and it does not restart containerd, because its containerd file is the same in 4.3.1 and 4.4.0. The 12 Kata processes of the three replicas keep running on the old program files and the old guest image, which then show as deleted. The 8 kernel files of 4.3.1 stay in `/opt/kata` (417 MB), because the installer removes no file that the new release does not ship.
+- For this test the replicas ran on the stock 4.3.1 handler, because the patched guest image fits 4.4.0 only. After the upgrade the extra handlers worked with no new install.
+- The loops make a new connection for each call. An outage shorter than about 0.5 s, and a connection that stays open, are not measured.
+- Not tested: more than one upgrade run, an upgrade in DaemonSet mode, an upgrade that changes the containerd file of `kata-deploy`, a rollback, and an old guest that runs for days on replaced files.
 
 ## Defects and fixes
 

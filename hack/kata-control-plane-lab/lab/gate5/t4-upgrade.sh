@@ -84,6 +84,13 @@ case "${1:-}" in
     mode=$(k -n "$HELM_NS" get configmap "$HELM_RELEASE-kata-deploy-state" -o jsonpath='{.data.deploymentMode}' 2>/dev/null)
     echo "deployment mode of the release: ${mode:-unknown}"
     [ "$mode" = "$MODE" ] || die "the release is in the mode $mode, not $MODE"
+    # A per-node Job of the install lives for 600 s. Do not delete it: wait for its end of life,
+    # so that the dispatcher of the upgrade makes its own Job (as test 3a does).
+    old=$(k -n "$HELM_NS" get jobs -l kata-deploy/stage=install --no-headers 2>/dev/null | awk '{print $1}' | tr '\n' ' ')
+    if [ -n "$old" ] && [ "${WAIT_OLD_JOB:-1}" = 1 ]; then
+      say "a per-node Job of an earlier run is present: $old. Wait until it is gone (at most 660 s)."
+      k -n "$HELM_NS" wait --for=delete job -l kata-deploy/stage=install --timeout=660s || die "the old Job did not go away"
+    fi
     state before identity
     sha_list before
     loops_start
@@ -125,8 +132,14 @@ case "${1:-}" in
       echo "paths that a clean $TO install does not have (left from $FROM), reference $ref:"
       comm -13 <(awk '{print $5}' "$ref" | sort) <(awk '{print $5}' "$OUT/state-after/opt-kata.lst" | sort) | sed 's/^/   /'
     fi
-    say "the running Kata processes after the upgrade: program file and open files in /opt"
-    grep -E '^INFO cp-[abc]-0 (shim|virtiofsd|hypervisor) pid=[0-9]+ (started|open files)' "$OUT/state-after/node.txt" | cut -c1-260
+    say "the Kata processes of the replicas BEFORE the upgrade: program file, open files and mapped files in /opt"
+    grep -E '^INFO cp-[abc]-0 (shim|virtiofsd|hypervisor) pid=[0-9]+ ' "$OUT/state-before/node.txt" | sed -E 's/started=.* exe=/program /; s/^INFO //' | cut -c1-260
+    say "the same processes AFTER the upgrade (a file with \"(deleted)\" was removed or replaced, and the process still has the old content)"
+    grep -E '^INFO cp-[abc]-0 (shim|virtiofsd|hypervisor) pid=[0-9]+ ' "$OUT/state-after/node.txt" | sed -E 's/started=.* exe=/program /; s/^INFO //' | cut -c1-260
+    say "does each process of the baseline still run (same PID and same start time)"
+    grep -E '^cp-[abc]-0 (shim|virtiofsd|hypervisor)\.[0-9]+=' "$OUT/state-before/kv.txt" | while read -r line; do
+      if grep -q -F -x "$line" "$OUT/state-after/kv.txt"; then echo "   runs: $line"; else echo "FAIL: gone or new: $line"; fi
+    done
     say "the guests after the upgrade (they must be the guests of $FROM)"
     grep -E '^cp-[abc]-0 (guest_kernel|boot_id)=' "$OUT/state-after/kv.txt"
     sleep 1
