@@ -292,3 +292,87 @@ func TestConfigureKubeVip_RPCFallbackBoundary(t *testing.T) {
 		})
 	}
 }
+
+// A cluster with an API server endpoint that NVKE does not manage has no VIP
+// for kube-vip to hold, so the step must not reach the node agent at all:
+// neither the typed RPC nor the legacy runbooks. The row with a VIP is the
+// control that shows the same fixture does reach the agent.
+func TestConfigureKubeVip_SkipsClusterWithoutManagedVIP(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		cluster   db.Cluster
+		wantCalls int
+	}{
+		"cluster with a controlPlaneEndpoint that NVKE does not manage": {
+			cluster: db.Cluster{ProviderType: db.ProviderTypeCAPI, ControlPlaneEndpoint: "172.18.255.200:6443"},
+		},
+		"cluster with a DNS controlPlaneEndpoint": {
+			cluster: db.Cluster{ProviderType: db.ProviderTypeCAPI, ControlPlaneEndpoint: "lb.example.com"},
+		},
+		// The API rejects this pair. The endpoint still comes first, as in kubeadm init.
+		"row with a controlPlaneEndpoint and a VIP": {
+			cluster: db.Cluster{ProviderType: db.ProviderTypeCAPI, ControlPlaneEndpoint: "lb.example.com:6443", ControlPlaneVIP: "10.0.0.10"},
+		},
+		"cluster with no endpoint and no VIP": {
+			cluster: db.Cluster{ProviderType: db.ProviderTypeCAPI},
+		},
+		"cluster with a VIP": {
+			cluster:   db.Cluster{ProviderType: db.ProviderTypeCAPI, ControlPlaneVIP: "10.0.0.10"},
+			wantCalls: 1,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			nodeID := uuid.New()
+			nodeSetID := uuid.New()
+			nodePoolID := uuid.New()
+			clusterID := uuid.New()
+			node := db.Node{
+				ID:           nodeID,
+				Name:         "cp-0",
+				ClusterID:    clusterID,
+				NodeSetID:    nodeSetID,
+				NodePoolID:   nodePoolID,
+				ControlPlane: true,
+				IP:           "10.0.0.20",
+			}
+			tt.cluster.ID = clusterID
+			nodePool := db.NodePool{ID: nodePoolID, ControlPlane: true, Capi: &db.CAPINodePoolProvider{}}
+			mockDB := &testutil.MockDB{}
+			mockDB.On("GetNode", mock.Anything, nodeID).Return(node, nil).Twice()
+			mockDB.On("GetNodeSet", mock.Anything, nodeSetID).Return(db.NodeSet{ID: nodeSetID, NodePoolID: nodePoolID}, nil)
+			mockDB.On("GetNodePool", mock.Anything, nodePoolID).Return(nodePool, nil)
+			mockDB.On("GetCluster", mock.Anything, clusterID).Return(tt.cluster, nil).Once()
+
+			fakeAgent := &agenttest.FakeClient{
+				ReconcileKubeVipResponse: &nvkeproto.ReconcileKubeVipResponse{
+					Outcome: nvkeproto.ReconcileKubeVipResponse_OUTCOME_CREATED,
+				},
+			}
+
+			a := &Activities{db: mockDB, nodeAgentClient: fakeAgent}
+			testSuite := &testsuite.WorkflowTestSuite{}
+			env := testSuite.NewTestActivityEnvironment()
+			env.RegisterActivity(a.configureKubeVip)
+			value, err := env.ExecuteActivity(a.configureKubeVip, ConfigureKubeVipInput{
+				NodeID:              nodeID,
+				ConfigureSuperAdmin: true,
+			})
+			require.NoError(t, err)
+			var result ConfigureKubeVipResult
+			require.NoError(t, value.Get(&result))
+
+			require.Len(t, fakeAgent.ReconcileKubeVipCalls, tt.wantCalls)
+			require.Len(t, fakeAgent.ReconcileKubeVipRequests, tt.wantCalls)
+			require.Empty(t, fakeAgent.ExecuteScriptNames)
+			if tt.wantCalls == 0 {
+				require.Equal(t, ConfigureKubeVipResult{}, result)
+			}
+			mockDB.AssertExpectations(t)
+		})
+	}
+}

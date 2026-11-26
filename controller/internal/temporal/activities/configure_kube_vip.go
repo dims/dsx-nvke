@@ -87,6 +87,13 @@ func (a *Activities) configureKubeVip(ctx context.Context, input ConfigureKubeVi
 		return ConfigureKubeVipResult{}, nil
 	}
 
+	if cluster.ControlPlaneEndpoint != "" {
+		// NVKE does not manage the API server endpoint of this cluster, so
+		// kube-vip has no address to hold. The check comes before the VIP, in
+		// the same order as kubeadmControlPlaneEndpoint.
+		return ConfigureKubeVipResult{}, nil
+	}
+
 	if cluster.ControlPlaneVIP == "" {
 		// No control plane VIP, so we don't need to configure KubeVip
 		return ConfigureKubeVipResult{}, nil
