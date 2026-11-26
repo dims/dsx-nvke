@@ -1,0 +1,32 @@
+# The pod of the lab client. It stands in for the NVKE controller, and its calls go through the
+# Service of the node pod. Phase 1 step 1 uses the plaintext mode of the agent, so the pod has no
+# SPIRE agent. It runs with runc and uses the node image only for "sleep" and kubectl.
+# run.sh fills the ${...} variables.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lab-client
+  namespace: ${NS}
+  labels: {app: lab-client}
+spec:
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  restartPolicy: Always
+  terminationGracePeriodSeconds: 2
+  containers:
+    - name: client
+      image: ${IMAGE}
+      imagePullPolicy: Never
+      command: ["sleep", "infinity"]
+      resources:
+        limits: {cpu: "1", memory: 512Mi}
+      volumeMounts:
+        - {name: bin, mountPath: /lab-bin, readOnly: true}
+        - {name: work, mountPath: /lab-work}
+  volumes:
+    # The client binary, from a folder of the kind node (run.sh copies it there).
+    - name: bin
+      hostPath: {path: ${CLIENT_BIN_DIR}, type: Directory}
+    # The kubeadm files for the request, and the kubeconfig that the agent returns.
+    - name: work
+      emptyDir: {medium: Memory}
