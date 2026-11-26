@@ -1,0 +1,32 @@
+# The SPIRE agent configuration of the node for gate 3, path 3. It is the NVKE template
+# (controller/internal/clients/capi/capi_spire_agent.conf.tmpl) with the joinToken branch replaced
+# by the node attestor k8s_psat. It holds no secret. The projected service account token is a
+# volume of the pod, at /g1n-psat/token.
+agent {
+    data_dir = "/var/lib/spire-agent"
+    log_level = "DEBUG"
+
+    server_address = "${SPIRE_SERVER_ADDRESS}"
+    server_port = "${SPIRE_SERVER_PORT}"
+
+    trust_domain = "${TRUST_DOMAIN}"
+    trust_bundle_path = "/etc/spire-agent/initial-trust-bundle.pem"
+}
+
+plugins {
+    KeyManager "disk" {
+        plugin_data {
+            directory = "/var/lib/spire-agent"
+        }
+    }
+    NodeAttestor "k8s_psat" {
+        plugin_data {
+            cluster = "gate3-pods"
+            token_path = "/g1n-psat/token"
+        }
+    }
+
+    WorkloadAttestor "unix" {
+        plugin_data {}
+    }
+}

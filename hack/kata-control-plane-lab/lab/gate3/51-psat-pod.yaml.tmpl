@@ -1,0 +1,57 @@
+# Gate 3, path 3: one node pod with its own SPIRE agent, and the claim for the agent data.
+# The claim stays when the pod is deleted. run-path3.sh fills the ${...} variables.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ${POD}-data
+  namespace: gate3
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: standard
+  resources:
+    requests: {storage: 100Mi}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${POD}
+  namespace: gate3
+  labels:
+    gate3-test: psat
+    gate3/node-uuid: ${UUID}
+spec:
+  runtimeClassName: ${RUNTIME_CLASS} #@runtimeclass
+  serviceAccountName: kata-node
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  restartPolicy: Always
+  terminationGracePeriodSeconds: 5
+  containers:
+    - name: node
+      image: nvke-node:bcc4376f-amd64
+      imagePullPolicy: Never
+      command: ["/bin/sh", "/psat-config/entry.sh"]
+      resources:
+        requests: {cpu: 100m, memory: 512Mi}
+        limits: {cpu: "1", memory: 512Mi}
+      volumeMounts:
+        - {name: config, mountPath: /psat-config, readOnly: true}
+        - {name: bundle, mountPath: /psat-bundle, readOnly: true}
+        - {name: token, mountPath: /var/run/secrets/tokens, readOnly: true}
+        - {name: data, mountPath: /var/lib/spire-agent}
+  volumes:
+    - name: config
+      configMap: {name: psat-agent}
+    - name: bundle
+      configMap: {name: spire-bundle}
+    # The projected service account token for k8s_psat. The audience must be in the list of the
+    # server plugin. 600 seconds is the shortest life that Kubernetes accepts.
+    - name: token
+      projected:
+        sources:
+          - serviceAccountToken:
+              path: token
+              audience: spire-server
+              expirationSeconds: ${TOKEN_SECONDS}
+    - name: data
+      persistentVolumeClaim: {claimName: ${POD}-data}

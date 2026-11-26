@@ -1,0 +1,15 @@
+# Test record only. It is not a need of a site. It reads the container files of Docker:
+# at boot before Docker starts, and at a clean shutdown after Docker stopped.
+[Unit]
+Description=Lab: record the container state that Docker has on disk
+RequiresMountsFor=/var/lib/docker /var/lib/vm-restart
+Before=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/vm-restart/record-docker-state.sh boot
+ExecStop=/opt/vm-restart/record-docker-state.sh shutdown
+
+[Install]
+WantedBy=multi-user.target

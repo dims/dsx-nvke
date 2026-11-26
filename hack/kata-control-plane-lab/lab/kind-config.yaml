@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Host cluster of the Kata lab. One kind node.
+# Make it with lab/00-host-setup.sh, which sets the Docker network and the node image.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: kata-cp
+nodes:
+  - role: control-plane

@@ -1,0 +1,6 @@
+/dev/loop20 /var/lib/vm-restart/disks/var-0.img
+/dev/loop21 /var/lib/vm-restart/disks/var-1.img
+/dev/loop22 /var/lib/vm-restart/disks/var-2.img
+/dev/loop23 /var/lib/vm-restart/disks/etcd-0.img
+/dev/loop24 /var/lib/vm-restart/disks/etcd-1.img
+/dev/loop25 /var/lib/vm-restart/disks/etcd-2.img

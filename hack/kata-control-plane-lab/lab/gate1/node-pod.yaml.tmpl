@@ -1,0 +1,87 @@
+# One pod that is a kubeadm control plane node, and the Service for its API server.
+# The same template serves runc and Kata. run.sh fills the ${...} variables and removes
+# the lines with a "#@" tag when their option is off:
+#   #@runtimeclass   only with RUNTIME_CLASS (empty = the default runtime, runc)
+#   #@modules        only with LIB_MODULES=1 (not for Kata: the guest has a different kernel)
+#   #@kernelconfig   only with KERNEL_CONFIG (a kernel config file for the kubeadm preflight check)
+# The template has no subPath mount, because Kata does not support it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${NAME}
+  namespace: ${NS}
+spec:
+  type: ClusterIP
+  selector: {app: ${NAME}}
+  ports:
+    - {name: api, port: 6443, targetPort: 6443}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${NAME}
+  namespace: ${NS}
+  labels: {app: ${NAME}}
+spec:
+  runtimeClassName: ${RUNTIME_CLASS} #@runtimeclass
+  # The hostname is the node name of the inner cluster. /etc/hosts gives it the pod IP.
+  hostname: ${NAME}
+  # The node needs no token of the host cluster.
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  restartPolicy: Always
+  # The image has the stop signal SIGRTMIN+3, so systemd stops the node in order. etcd stops in
+  # some seconds. The API server does not stop while etcd is down, and systemd waits 90 s for it.
+  # So the stop always ends with a kill after this time. Docker gives a kind node 10 s.
+  terminationGracePeriodSeconds: ${GRACE}
+  containers:
+    - name: node
+      image: ${IMAGE}
+      imagePullPolicy: Never
+      # The wrapper prepares the volumes and the node state, then starts the kind entrypoint.
+      command: ["/g1/wrapper.sh"]
+      # kind and nico-sim give the node a terminal. systemd then writes its start log to the pod log.
+      tty: true
+      securityContext:
+        privileged: true
+      env:
+        # Empty = the kind entrypoint selects. Other values: overlayfs, native, fuse-overlayfs.
+        - {name: KIND_EXPERIMENTAL_CONTAINERD_SNAPSHOTTER, value: "${SNAPSHOTTER}"}
+        # The container has its own kernel (a Kata guest). The wrapper then sets guest values.
+        - {name: G1_GUEST, value: "1"} #@runtimeclass
+        # Test switch: wrapper steps to leave out.
+        - {name: G1_SKIP, value: "${G1_SKIP}"}
+        # Seconds that systemd in the node waits for a unit to stop. Empty = the systemd default (90).
+        - {name: G1_STOP_TIMEOUT, value: "${STOP_TIMEOUT}"}
+      # Requests are equal to limits. The Kata Rust runtime sizes the VM from the limits.
+      resources:
+        limits: {cpu: "${CPU}", memory: ${MEMORY}}
+      # The pod is ready when the API server of the inner cluster is ready.
+      readinessProbe:
+        httpGet: {path: /readyz, port: 6443, scheme: HTTPS}
+        periodSeconds: 2
+        failureThreshold: 1
+      volumeDevices:
+        - {name: var, devicePath: /dev/g1-var}
+        - {name: etcd, devicePath: /dev/g1-etcd}
+      volumeMounts:
+        - {name: run, mountPath: /run}
+        - {name: tmp, mountPath: /tmp}
+        - {name: wrapper, mountPath: /g1, readOnly: true}
+        - {name: modules, mountPath: /lib/modules, readOnly: true} #@modules
+        - {name: kernel-config, mountPath: /g1-kernel, readOnly: true} #@kernelconfig
+  volumes:
+    - name: run
+      emptyDir: {medium: Memory}
+    - name: tmp
+      emptyDir: {medium: Memory}
+    - name: var
+      persistentVolumeClaim: {claimName: ${NAME}-var}
+    - name: etcd
+      persistentVolumeClaim: {claimName: ${NAME}-etcd}
+    - name: wrapper
+      configMap: {name: ${NAME}-wrapper, defaultMode: 0755}
+    - name: modules #@modules
+      hostPath: {path: /lib/modules} #@modules
+    - name: kernel-config #@kernelconfig
+      configMap: {name: ${NAME}-kernel-config} #@kernelconfig

@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# MetalLB address pool of the lab.
+# The pool is in the subnet of the Docker network kata-vm (172.31.0.0/16).
+# Docker gives containers addresses from 172.31.0.0/24 only, so the pool stays free.
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: lab
+  namespace: metallb-system
+spec:
+  addresses:
+    - 172.31.255.200-172.31.255.250
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: lab
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - lab

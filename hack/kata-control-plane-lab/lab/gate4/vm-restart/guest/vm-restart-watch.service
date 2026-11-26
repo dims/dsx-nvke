@@ -1,0 +1,16 @@
+# Test record only. It is not a need of a site. It starts early at each boot. When a restart
+# test is pending, it writes the time of each event after the kernel boot. It only reads.
+[Unit]
+Description=Lab: record the time of each event after a machine restart
+After=vm-restart-guard.service vm-restart-loops.service
+ConditionFileNotEmpty=/var/lib/vm-restart/pending
+
+[Service]
+Type=simple
+Environment=HOME=/root
+ExecStart=/opt/vm-restart/watch.sh
+StandardOutput=append:/var/lib/vm-restart/logs/watch.out
+StandardError=inherit
+
+[Install]
+WantedBy=multi-user.target

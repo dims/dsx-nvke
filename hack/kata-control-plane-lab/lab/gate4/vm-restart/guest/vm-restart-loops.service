@@ -1,0 +1,18 @@
+# Loop devices for the raw block volumes of the lab.
+# The PersistentVolumes name /dev/loop20 to /dev/loop25, so each file must get the same device
+# at each boot. Docker gives the kind node container the device nodes that exist when the
+# container starts, so this unit runs before Docker, and Docker does not start without it.
+[Unit]
+Description=Lab: attach the sparse files to fixed loop devices before Docker starts
+RequiresMountsFor=/var/lib/vm-restart/disks
+After=systemd-modules-load.service
+Before=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/vm-restart/attach-loops.sh
+
+[Install]
+WantedBy=multi-user.target
+RequiredBy=docker.service

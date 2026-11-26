@@ -1,0 +1,18 @@
+# /etc/vm-restart-guard.nft. Test safety only. It is not a need of a site.
+# No packet for a private address leaves the VM through eth0. The network of QEMU itself
+# (192.168.5.0/24: gateway, DNS) stays reachable.
+table inet vm_restart_guard {
+  set private4 {
+    type ipv4_addr
+    flags interval
+    elements = { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 }
+  }
+  chain forward {
+    type filter hook forward priority -10; policy accept;
+    oifname "eth0" ip daddr @private4 ip daddr != 192.168.5.0/24 counter reject with icmpx type host-unreachable
+  }
+  chain output {
+    type filter hook output priority -10; policy accept;
+    oifname "eth0" ip daddr @private4 ip daddr != 192.168.5.0/24 counter reject with icmpx type host-unreachable
+  }
+}

@@ -1,0 +1,57 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Gate 3, path 3: the parts that all node pods share. A SPIRE agent in the pod attests to the
+# server with the node attestor k8s_psat and a projected service account token. No join token.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kata-node
+  namespace: gate3
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: psat-agent
+  namespace: gate3
+data:
+  # The NVKE template (controller/internal/clients/capi/capi_spire_agent.conf.tmpl) with the
+  # joinToken branch replaced by k8s_psat. The socket is the default, /tmp/spire-agent/public/api.sock.
+  agent.conf: |
+    agent {
+        data_dir = "/var/lib/spire-agent"
+        log_level = "DEBUG"
+
+        server_address = "spire-server.gate3-spire.svc.cluster.local"
+        server_port = "8081"
+
+        trust_domain = "gate3.lab.test"
+        trust_bundle_path = "/etc/spire-agent/initial-trust-bundle.pem"
+    }
+
+    plugins {
+        KeyManager "disk" {
+            plugin_data {
+                directory = "/var/lib/spire-agent"
+            }
+        }
+        NodeAttestor "k8s_psat" {
+            plugin_data {
+                cluster = "gate3-pods"
+                token_path = "/var/run/secrets/tokens/token"
+            }
+        }
+
+        WorkloadAttestor "unix" {
+            plugin_data {}
+        }
+    }
+  entry.sh: |
+    #!/bin/sh
+    # Container command: run the SPIRE agent as the main process.
+    set -eu
+    install -d -m 0755 /etc/spire-agent
+    install -m 0644 /psat-config/agent.conf /etc/spire-agent/agent.conf
+    install -m 0644 /psat-bundle/bundle.pem /etc/spire-agent/initial-trust-bundle.pem
+    echo "entry: kernel $(uname -r), data folder: $(ls -A /var/lib/spire-agent | tr '\n' ' ')"
+    exec /usr/local/bin/spire-agent run -config /etc/spire-agent/agent.conf

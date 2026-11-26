@@ -1,0 +1,132 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Gate 3, path 2: a SPIRE agent on the host node, as a DaemonSet with runc.
+# It attests to the server with k8s_psat (cluster name gate3-host). Its Workload API socket is
+#   /run/spire/gate3-agent-sockets/spire-agent.sock   in the kind node (a hostPath folder).
+# The workload attestors are k8s (with disable_container_selectors = true, as the NVKE values
+# file deploy/nico/spire/values.yaml sets it) and unix.
+# The image is the NVKE node image, because the kind node has it already and it holds the
+# spire-agent 1.14.1 binary and a shell. No new image pull.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spire-agent
+  namespace: gate3-spire
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gate3-spire-agent
+rules:
+  # The k8s workload attestor asks the kubelet for the pod list (secure port 10250).
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "nodes/proxy"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gate3-spire-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gate3-spire-agent
+subjects:
+  - kind: ServiceAccount
+    name: spire-agent
+    namespace: gate3-spire
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-agent
+  namespace: gate3-spire
+data:
+  agent.conf: |
+    agent {
+      data_dir = "/run/spire/data"
+      log_level = "DEBUG"
+      server_address = "spire-server.gate3-spire.svc.cluster.local"
+      server_port = "8081"
+      socket_path = "/run/spire/agent-sockets/spire-agent.sock"
+      trust_bundle_path = "/run/spire/bundle/bundle.pem"
+      trust_domain = "gate3.lab.test"
+    }
+    plugins {
+      NodeAttestor "k8s_psat" {
+        plugin_data {
+          cluster = "gate3-host"
+          token_path = "/var/run/secrets/tokens/spire-agent"
+        }
+      }
+      KeyManager "memory" {
+        plugin_data {}
+      }
+      WorkloadAttestor "k8s" {
+        plugin_data {
+          # The kubelet certificate of a kind node is not signed by the cluster CA.
+          skip_kubelet_verification = true
+          node_name_env = "MY_NODE_IP"
+          disable_container_selectors = true
+        }
+      }
+      WorkloadAttestor "unix" {
+        plugin_data {}
+      }
+    }
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: spire-agent
+  namespace: gate3-spire
+spec:
+  selector:
+    matchLabels: {app: spire-agent}
+  template:
+    metadata:
+      labels: {app: spire-agent}
+    spec:
+      serviceAccountName: spire-agent
+      enableServiceLinks: false
+      # The workload attestors read /proc/<pid> of the caller, so the agent needs the PID namespace of the node.
+      hostPID: true
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: spire-agent
+          image: nvke-node:bcc4376f-amd64
+          imagePullPolicy: Never
+          command: ["/usr/local/bin/spire-agent", "run", "-config", "/run/spire/config/agent.conf"]
+          env:
+            - name: MY_NODE_IP
+              valueFrom:
+                fieldRef: {fieldPath: status.hostIP}
+          securityContext:
+            privileged: true
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: "1", memory: 256Mi}
+          volumeMounts:
+            - {name: config, mountPath: /run/spire/config, readOnly: true}
+            - {name: bundle, mountPath: /run/spire/bundle, readOnly: true}
+            - {name: sockets, mountPath: /run/spire/agent-sockets}
+            - {name: token, mountPath: /var/run/secrets/tokens, readOnly: true}
+            - {name: data, mountPath: /run/spire/data}
+      volumes:
+        - name: config
+          configMap: {name: spire-agent}
+        - name: bundle
+          configMap: {name: spire-bundle}
+        - name: sockets
+          hostPath: {path: /run/spire/gate3-agent-sockets, type: DirectoryOrCreate}
+        - name: token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: spire-agent
+                  audience: spire-server
+                  expirationSeconds: 7200
+        - name: data
+          emptyDir: {}

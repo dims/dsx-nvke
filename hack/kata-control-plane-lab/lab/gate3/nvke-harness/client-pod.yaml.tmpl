@@ -1,0 +1,42 @@
+# The pod of the lab client. It stands in for the NVKE controller: it has its own SPIRE agent with
+# its own join token, so the client uses no socket of the host, and its calls go through the
+# Service of the node pod. The pod uses the node image only for the spire-agent 1.14.1 binary and
+# kubectl. It runs with runc and with no systemd. run.sh fills the ${...} variables.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lab-client
+  namespace: ${NS}
+  labels: {app: lab-client}
+spec:
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  restartPolicy: Always
+  terminationGracePeriodSeconds: 5
+  containers:
+    - name: client
+      image: ${IMAGE}
+      imagePullPolicy: Never
+      command: ["/lab/client-entry.sh"]
+      resources:
+        limits: {cpu: "1", memory: 512Mi}
+      volumeMounts:
+        - {name: entry, mountPath: /lab, readOnly: true}
+        - {name: bin, mountPath: /lab-bin, readOnly: true}
+        - {name: spire, mountPath: /lab-spire, readOnly: true}
+        - {name: spire-data, mountPath: /var/lib/spire-agent}
+        - {name: work, mountPath: /lab-work}
+  volumes:
+    - name: entry
+      configMap: {name: lab-client-entry, defaultMode: 0755}
+    # The client binary, from a folder of the kind node (run.sh copies it there).
+    - name: bin
+      hostPath: {path: ${CLIENT_BIN_DIR}, type: Directory}
+    - name: spire
+      secret: {secretName: lab-client-spire}
+    # The key and the SVID of the SPIRE agent. They stay through a container restart.
+    - name: spire-data
+      emptyDir: {}
+    # The kubeadm files for the request, and the kubeconfig that the agent returns.
+    - name: work
+      emptyDir: {medium: Memory}

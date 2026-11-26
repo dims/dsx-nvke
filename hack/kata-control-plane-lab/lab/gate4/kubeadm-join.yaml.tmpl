@@ -1,0 +1,22 @@
+# kubeadm config for a replica that joins the control plane of gate 4. run.sh fills the
+# ${...} variables and puts the result at /kind/kubeadm-join.conf in the pod.
+# The etcd settings come from the ClusterConfiguration that the first replica stored in the
+# cluster (ConfigMap kubeadm-config), so this file names no etcd setting.
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    apiServerEndpoint: ${IP_API}:6443
+    token: ${TOKEN}
+    caCertHashes: ["${CA_HASH}"]
+controlPlane:
+  localAPIEndpoint:
+    advertiseAddress: ${NODE_IP}
+    bindPort: 6443
+  certificateKey: ${CERT_KEY}
+nodeRegistration:
+  name: ${NAME}
+  criSocket: unix:///run/containerd/containerd.sock
+  imagePullPolicy: Never
+  kubeletExtraArgs:
+    - {name: node-ip, value: "${NODE_IP}"}

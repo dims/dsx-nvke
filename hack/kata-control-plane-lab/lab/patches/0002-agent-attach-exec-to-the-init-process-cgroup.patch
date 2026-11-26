@@ -1,0 +1,623 @@
+From 96a8d905be9767552e1b1abe47eaa1c029588e31 Mon Sep 17 00:00:00 2001
+From: Martin Bidlingmaier <bidlingmaier@nvidia.com>
+Date: Wed, 25 Nov 2026 18:07:29 -0500
+Subject: [PATCH 2/2] agent: attach exec to the init process cgroup
+
+cgroup v2 rejects processes in inner nodes once controllers are
+enabled. systemd and Docker-in-Docker move PID 1 into a child
+(init.scope / init), so exec must follow that leaf instead of the
+container root.
+
+The previous hardcoded "init/" check only covered DinD. Look up
+/proc/<init>/cgroup instead, including the cgroup-namespace view the
+agent sees after CLONE_NEWCGROUP. If init has moved outside the
+container cgroup, attach to that path.
+
+The rustjail tests cover path classification (nested vs a move out of
+the container), /proc cgroup parsing, and live leaf attach when the
+cgroup filesystem is writable.
+
+This is a backport to 4.4.0 of the first two commits of the open pull
+request kata-containers/kata-containers#13627 (Fixes #10733):
+
+  dc5bda2aae9d agent: attach exec to the init process cgroup
+  25d63043a889 agent: add rustjail tests for cgroup v2 nesting
+
+The third commit of the pull request changes only the Kubernetes
+integration tests and is not included.
+
+Changes made for the backport:
+
+- Conflicts in cgroups/fs/mod.rs with 4.4.0 and with the previous
+  commit are resolved.
+- The systemd manager passes the subcgroup to AttachProcessesToUnit
+  as an absolute path ("/init.scope"), as the code did before this
+  change ("/init/"). systemd refuses a subcgroup path that is not
+  absolute, so the relative path of the pull request cannot work.
+
+Signed-off-by: Martin Bidlingmaier <bidlingmaier@nvidia.com>
+Signed-off-by: Davanum Srinivas <davanum@gmail.com>
+---
+ src/agent/rustjail/src/cgroups/fs/mod.rs      |  77 +----
+ src/agent/rustjail/src/cgroups/mock.rs        |   2 +-
+ src/agent/rustjail/src/cgroups/mod.rs         |   3 +-
+ src/agent/rustjail/src/cgroups/nested.rs      | 303 ++++++++++++++++++
+ .../rustjail/src/cgroups/systemd/manager.rs   |  24 +-
+ src/agent/rustjail/src/container.rs           |   8 +-
+ 6 files changed, 339 insertions(+), 78 deletions(-)
+ create mode 100644 src/agent/rustjail/src/cgroups/nested.rs
+
+diff --git a/src/agent/rustjail/src/cgroups/fs/mod.rs b/src/agent/rustjail/src/cgroups/fs/mod.rs
+index d8d9535..4031f69 100644
+--- a/src/agent/rustjail/src/cgroups/fs/mod.rs
++++ b/src/agent/rustjail/src/cgroups/fs/mod.rs
+@@ -19,6 +19,7 @@ use cgroups::{
+     DeviceResource, HugePageResource, MaxValue, NetworkPriority,
+ };
+ 
++use crate::cgroups::nested::exec_cgroup;
+ use crate::cgroups::{rule_for_all_devices, Manager as CgroupManager};
+ use crate::container::DEFAULT_DEVICES;
+ use anyhow::{anyhow, Context, Result};
+@@ -45,8 +46,6 @@ use super::DevicesCgroupInfo;
+ 
+ const GUEST_CPUS_PATH: &str = "/sys/devices/system/cpu/online";
+ const CGROUP_PROCS: &str = "cgroup.procs";
+-const ROOT_SUBCGROUP: &str = "/";
+-const INIT_SUBCGROUP: &str = "/init/";
+ 
+ // Convenience function to obtain the scope logger.
+ fn sl() -> slog::Logger {
+@@ -86,18 +85,12 @@ macro_rules! set_resource {
+ }
+ 
+ impl CgroupManager for Manager {
+-    fn apply(&self, pid: pid_t) -> Result<()> {
+-        let cgroup_pid = CgroupPid::from(pid as u64);
+-        if cgroup_has_init_subcgroup(&self.cpath) {
+-            let cpath = self.cgroup_path_with_subcgroup(INIT_SUBCGROUP);
+-            load_cgroup(cgroups::hierarchies::auto(), &cpath)
+-                .add_task_by_tgid(cgroup_pid)
+-                .with_context(|| format!("add task {} to cgroup {}", pid, cpath))?;
+-        } else {
+-            self.cgroup
+-                .add_task_by_tgid(cgroup_pid)
+-                .with_context(|| format!("add task {} to cgroup {}", pid, self.cpath))?;
+-        }
++    fn apply(&self, pid: pid_t, init_pid: pid_t) -> Result<()> {
++        let path = exec_cgroup(pid, init_pid, &self.cpath);
++        let cgroup = load_cgroup(cgroups::hierarchies::auto(), &path);
++        cgroup
++            .add_task_by_tgid(CgroupPid::from(pid as u64))
++            .context(format!("add task {} to cgroup {}", pid, cgroup.path()))?;
+         Ok(())
+     }
+ 
+@@ -1033,17 +1026,11 @@ pub fn get_paths() -> Result<HashMap<String, String>> {
+     Ok(m)
+ }
+ 
++#[cfg(test)]
+ fn cgroup_path_under_root(root: impl AsRef<Path>, cpath: &str) -> PathBuf {
+     root.as_ref().join(cpath.trim_start_matches('/'))
+ }
+ 
+-fn cgroup_has_init_subcgroup(cpath: &str) -> bool {
+-    cgroups::hierarchies::is_cgroup2_unified_mode()
+-        && cgroup_path_under_root(cgroups::hierarchies::auto().root(), cpath)
+-            .join("init")
+-            .exists()
+-}
+-
+ pub fn get_mounts(paths: &HashMap<String, String>) -> Result<HashMap<String, String>> {
+     let mut m = HashMap::new();
+ 
+@@ -1080,7 +1067,7 @@ fn new_cgroup(h: Box<dyn cgroups::Hierarchy>, path: &str) -> Result<Cgroup> {
+ }
+ 
+ #[inline]
+-fn load_cgroup(h: Box<dyn cgroups::Hierarchy>, path: &str) -> Cgroup {
++pub(crate) fn load_cgroup(h: Box<dyn cgroups::Hierarchy>, path: &str) -> Cgroup {
+     let valid_path = path.trim_start_matches('/').to_string();
+     cgroups::Cgroup::load(h, valid_path.as_str())
+ }
+@@ -1234,27 +1221,6 @@ impl Manager {
+         })
+     }
+ 
+-    pub fn subcgroup(&self) -> &str {
+-        // Check if we're running with cgroup v2 delegation by verifying:
+-        // 1. We're using cgroups v2 (which restricts direct process control)
+-        // 2. An "init" subdirectory exists for delegated process attachment
+-        //    (for example, Docker-in-Docker or systemd in a container)
+-        if cgroup_has_init_subcgroup(&self.cpath) {
+-            INIT_SUBCGROUP
+-        } else {
+-            ROOT_SUBCGROUP
+-        }
+-    }
+-
+-    fn cgroup_path_with_subcgroup(&self, subcgroup: &str) -> String {
+-        let subcgroup = subcgroup.trim_matches('/');
+-        if subcgroup.is_empty() {
+-            self.cpath.clone()
+-        } else {
+-            Path::new(&self.cpath).join(subcgroup).display().to_string()
+-        }
+-    }
+-
+     fn get_paths_and_mounts(
+         cpath: &str,
+     ) -> Result<(HashMap<String, String>, HashMap<String, String>)> {
+@@ -1473,9 +1439,7 @@ mod tests {
+     use tempfile::tempdir;
+     use test_utils::skip_if_not_root;
+ 
+-    use super::{
+-        cgroup_path_under_root, collect_pids, default_allowed_devices, load_cgroup, CGROUP_PROCS,
+-    };
++    use super::{cgroup_path_under_root, collect_pids, default_allowed_devices, CGROUP_PROCS};
+     use crate::cgroups::fs::{
+         get_throttled_time, line_to_vec, lines_to_map, Manager, DEFAULT_ALLOWED_DEVICES, WILDCARD,
+     };
+@@ -1493,27 +1457,6 @@ mod tests {
+         );
+     }
+ 
+-    #[test]
+-    fn test_cgroup_path_with_subcgroup_preserves_absolute_cpath() {
+-        let manager = Manager {
+-            paths: HashMap::new(),
+-            mounts: HashMap::new(),
+-            cpath: "/docker.slice/docker-containers.slice/container".to_string(),
+-            cgroup: load_cgroup(cgroups::hierarchies::auto(), "/"),
+-            pod_cgroup: None,
+-            devcg_allowed_all: false,
+-        };
+-
+-        assert_eq!(
+-            manager.cgroup_path_with_subcgroup("/init/"),
+-            "/docker.slice/docker-containers.slice/container/init"
+-        );
+-        assert_eq!(
+-            manager.cgroup_path_with_subcgroup("/"),
+-            "/docker.slice/docker-containers.slice/container"
+-        );
+-    }
+-
+     #[test]
+     fn test_collect_pids() {
+         // The layout of a container that runs systemd with cgroup v2: the
+diff --git a/src/agent/rustjail/src/cgroups/mock.rs b/src/agent/rustjail/src/cgroups/mock.rs
+index 10fcdf2..1969309 100644
+--- a/src/agent/rustjail/src/cgroups/mock.rs
++++ b/src/agent/rustjail/src/cgroups/mock.rs
+@@ -29,7 +29,7 @@ pub struct Manager {
+ }
+ 
+ impl CgroupManager for Manager {
+-    fn apply(&self, _: pid_t) -> Result<()> {
++    fn apply(&self, _: pid_t, _: pid_t) -> Result<()> {
+         Ok(())
+     }
+ 
+diff --git a/src/agent/rustjail/src/cgroups/mod.rs b/src/agent/rustjail/src/cgroups/mod.rs
+index e90424f..4420dd6 100644
+--- a/src/agent/rustjail/src/cgroups/mod.rs
++++ b/src/agent/rustjail/src/cgroups/mod.rs
+@@ -14,6 +14,7 @@ use cgroups::freezer::FreezerState;
+ 
+ pub mod fs;
+ pub mod mock;
++pub mod nested;
+ pub mod notifier;
+ pub mod systemd;
+ 
+@@ -27,7 +28,7 @@ pub struct DevicesCgroupInfo {
+ }
+ 
+ pub trait Manager {
+-    fn apply(&self, _pid: i32) -> Result<()> {
++    fn apply(&self, _pid: i32, _init_pid: i32) -> Result<()> {
+         Err(anyhow!("not supported!".to_string()))
+     }
+ 
+diff --git a/src/agent/rustjail/src/cgroups/nested.rs b/src/agent/rustjail/src/cgroups/nested.rs
+new file mode 100644
+index 0000000..0ee8a8c
+--- /dev/null
++++ b/src/agent/rustjail/src/cgroups/nested.rs
+@@ -0,0 +1,303 @@
++// Copyright (c) 2026 Kata Contributors
++//
++// SPDX-License-Identifier: Apache-2.0
++//
++
++// Resolve the cgroup v2 leaf used to attach an exec process.
++// After systemd (init.scope) or DinD (init) nest PID 1, the container
++// cgroup is an inner node and cgroup.procs writes to it fail with EBUSY.
++
++use crate::cgroups_rs as cgroups;
++use libc::pid_t;
++use std::fs;
++
++fn sl() -> slog::Logger {
++    slog_scope::logger().new(o!("subsystem" => "cgroups"))
++}
++
++// Hierarchy-relative path the exec process should join.
++pub fn exec_cgroup(pid: pid_t, init_pid: pid_t, container_cgroup: &str) -> String {
++    let container_cgroup = normalize_cgroup_path(container_cgroup);
++
++    if !cgroups::hierarchies::is_cgroup2_unified_mode() {
++        return container_cgroup.to_string();
++    }
++
++    if init_pid <= 0 || pid == init_pid {
++        return container_cgroup.to_string();
++    }
++
++    let contents = match fs::read_to_string(format!("/proc/{init_pid}/cgroup")) {
++        Ok(contents) => contents,
++        Err(err) => {
++            debug!(sl(), "read /proc/{}/cgroup: {}", init_pid, err);
++            return container_cgroup.to_string();
++        }
++    };
++
++    if let Some(path) = cgroup_from_cgroup_file(&contents, container_cgroup) {
++        debug!(
++            sl(),
++            "exec cgroup from init pid {}: {} (container {})", init_pid, path, container_cgroup
++        );
++        return path;
++    }
++
++    debug!(
++        sl(),
++        "no exec cgroup from init pid {}, using container", init_pid
++    );
++    container_cgroup.to_string()
++}
++
++// /proc/<pid>/cgroup is either the full hierarchy path (--cgroupns=host)
++// or already relative to the container cgroup (--cgroupns=private).
++// If the path is not under the container, exists() tells a private-ns
++// view from init having moved elsewhere.
++fn cgroup_from_cgroup_file(contents: &str, container_cgroup: &str) -> Option<String> {
++    contents.lines().find_map(|line| {
++        let init = normalize_cgroup_path(line.strip_prefix("0::")?);
++        if init == container_cgroup || init.is_empty() {
++            return Some(container_cgroup.to_string());
++        }
++        if let Some(rel) = init.strip_prefix(container_cgroup) {
++            if let Some(rel) = rel.strip_prefix('/') {
++                return Some(join_cgroup(container_cgroup, rel));
++            }
++        }
++        let under_container = join_cgroup(container_cgroup, init);
++        if cgroup_exists(&under_container) || !cgroup_exists(init) {
++            Some(under_container)
++        } else {
++            Some(init.to_string())
++        }
++    })
++}
++
++fn join_cgroup(parent: &str, child: &str) -> String {
++    if parent.is_empty() {
++        child.to_string()
++    } else if child.is_empty() {
++        parent.to_string()
++    } else {
++        format!("{parent}/{child}")
++    }
++}
++
++fn cgroup_exists(path: &str) -> bool {
++    cgroups::Cgroup::load(cgroups::hierarchies::auto(), path).exists()
++}
++
++// /proc and OCI cgroup paths are relative to the hierarchy; a leading
++// '/' is the cgroup root, not the filesystem root.
++pub(crate) fn normalize_cgroup_path(path: &str) -> &str {
++    path.trim().trim_matches('/')
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::fs;
++    use test_utils::skip_if_not_root;
++
++    #[test]
++    fn test_cgroup_from_cgroup_file() {
++        let test_cases = vec![
++            (
++                "0::/system.slice/cri-containerd-abc.scope/init.scope\n",
++                "system.slice/cri-containerd-abc.scope",
++                Some("system.slice/cri-containerd-abc.scope/init.scope"),
++            ),
++            (
++                "0::/system.slice/cri-containerd-abc.scope/init.scope\n",
++                "/system.slice/cri-containerd-abc.scope",
++                Some("system.slice/cri-containerd-abc.scope/init.scope"),
++            ),
++            (
++                "0::/\n",
++                "system.slice/cri-containerd-abc.scope",
++                Some("system.slice/cri-containerd-abc.scope"),
++            ),
++            (
++                "0::/kubepods/besteffort/podx/ctry/init\n",
++                "/kubepods/besteffort/podx/ctry",
++                Some("kubepods/besteffort/podx/ctry/init"),
++            ),
++            (
++                "0::/system.slice/foo.scope\n",
++                "system.slice/foo.scope",
++                Some("system.slice/foo.scope"),
++            ),
++            (
++                "0::/system.slice/foo.scope/\n",
++                "system.slice/foo.scope",
++                Some("system.slice/foo.scope"),
++            ),
++            (
++                "0::/a/b.slice/init.scope/payload.service\n",
++                "/a/b.slice",
++                Some("a/b.slice/init.scope/payload.service"),
++            ),
++            (
++                "12:memory:/\n11:cpu,cpuacct:/\n",
++                "system.slice/foo.scope",
++                None,
++            ),
++            ("", "system.slice/foo.scope", None),
++            (
++                "12:memory:/\n0::/a/b/init.scope\n",
++                "/a/b",
++                Some("a/b/init.scope"),
++            ),
++        ];
++
++        for (contents, container_cgroup, expected) in test_cases {
++            assert_eq!(
++                cgroup_from_cgroup_file(contents, normalize_cgroup_path(container_cgroup))
++                    .as_deref(),
++                expected,
++                "contents={:?} container={}",
++                contents,
++                container_cgroup
++            );
++        }
++    }
++
++    #[test]
++    fn test_live_cgroup_v2_init_scope_lookup() {
++        use std::process::{Command, Stdio};
++
++        skip_if_not_root!();
++        if !cgroups::hierarchies::is_cgroup2_unified_mode() {
++            println!("INFO: skipping live cgroup test; not cgroup v2");
++            return;
++        }
++
++        let root = cgroups::hierarchies::auto().root();
++        let name = format!(
++            "kata-nest-test-{}-{}",
++            std::process::id(),
++            std::time::SystemTime::now()
++                .duration_since(std::time::UNIX_EPOCH)
++                .unwrap()
++                .as_secs()
++        );
++        let parent = root.join(&name);
++        if let Err(err) = fs::create_dir(&parent) {
++            println!(
++                "INFO: skipping live cgroup test; cannot create {:?}: {}",
++                parent, err
++            );
++            return;
++        }
++
++        let init_scope = parent.join("init.scope");
++        fs::create_dir(&init_scope).unwrap();
++
++        let mut child = Command::new("sleep")
++            .arg("30")
++            .stdin(Stdio::null())
++            .stdout(Stdio::null())
++            .stderr(Stdio::null())
++            .spawn()
++            .unwrap();
++        let child_pid = child.id() as i32;
++
++        defer!({
++            let _ = child.kill();
++            let _ = child.wait();
++            let _ = fs::remove_dir(&init_scope);
++            let _ = fs::remove_dir(&parent);
++        });
++
++        fs::write(init_scope.join("cgroup.procs"), child_pid.to_string()).unwrap();
++
++        let looked_up = exec_cgroup(i32::MAX, child_pid, &name);
++        assert_eq!(looked_up, format!("{name}/init.scope"));
++
++        if fs::write(parent.join("cgroup.subtree_control"), "+pids").is_ok() {
++            let mut extra = Command::new("sleep")
++                .arg("5")
++                .stdin(Stdio::null())
++                .stdout(Stdio::null())
++                .stderr(Stdio::null())
++                .spawn()
++                .unwrap();
++            let extra_pid = extra.id() as i32;
++            let err = fs::write(parent.join("cgroup.procs"), extra_pid.to_string()).unwrap_err();
++            assert_eq!(err.raw_os_error(), Some(libc::EBUSY));
++            fs::write(init_scope.join("cgroup.procs"), extra_pid.to_string()).unwrap();
++            extra.kill().ok();
++            let _ = extra.wait();
++        }
++    }
++
++    #[test]
++    fn test_live_cgroup_v2_init_moved_outside() {
++        use std::process::{Command, Stdio};
++
++        skip_if_not_root!();
++        if !cgroups::hierarchies::is_cgroup2_unified_mode() {
++            println!("INFO: skipping live cgroup test; not cgroup v2");
++            return;
++        }
++
++        let root = cgroups::hierarchies::auto().root();
++        let stamp = format!(
++            "{}-{}",
++            std::process::id(),
++            std::time::SystemTime::now()
++                .duration_since(std::time::UNIX_EPOCH)
++                .unwrap()
++                .as_secs()
++        );
++        let container = root.join(format!("kata-nest-test-{stamp}"));
++        let outside = root.join(format!("kata-nest-out-{stamp}"));
++        if let Err(err) = fs::create_dir(&container) {
++            println!(
++                "INFO: skipping live cgroup test; cannot create {:?}: {}",
++                container, err
++            );
++            return;
++        }
++        if let Err(err) = fs::create_dir(&outside) {
++            let _ = fs::remove_dir(&container);
++            println!(
++                "INFO: skipping live cgroup test; cannot create {:?}: {}",
++                outside, err
++            );
++            return;
++        }
++
++        let mut child = Command::new("sleep")
++            .arg("30")
++            .stdin(Stdio::null())
++            .stdout(Stdio::null())
++            .stderr(Stdio::null())
++            .spawn()
++            .unwrap();
++        let child_pid = child.id() as i32;
++
++        defer!({
++            let _ = child.kill();
++            let _ = child.wait();
++            let _ = fs::remove_dir(&outside);
++            let _ = fs::remove_dir(&container);
++        });
++
++        if let Err(err) = fs::write(outside.join("cgroup.procs"), child_pid.to_string()) {
++            println!(
++                "INFO: skipping live cgroup test; cannot move pid into {:?}: {}",
++                outside, err
++            );
++            return;
++        }
++
++        let looked_up = exec_cgroup(
++            i32::MAX,
++            child_pid,
++            container.file_name().unwrap().to_str().unwrap(),
++        );
++        assert_eq!(looked_up, outside.file_name().unwrap().to_str().unwrap());
++    }
++}
+diff --git a/src/agent/rustjail/src/cgroups/systemd/manager.rs b/src/agent/rustjail/src/cgroups/systemd/manager.rs
+index 651fe50..4938bda 100644
+--- a/src/agent/rustjail/src/cgroups/systemd/manager.rs
++++ b/src/agent/rustjail/src/cgroups/systemd/manager.rs
+@@ -3,11 +3,13 @@
+ // SPDX-License-Identifier: Apache-2.0
+ //
+ 
++use crate::cgroups::nested::{exec_cgroup, normalize_cgroup_path};
+ use crate::cgroups::Manager as CgroupManager;
+ use crate::cgroups_rs as cgroups;
+ use crate::protocols::agent::CgroupStats;
+-use anyhow::{anyhow, Result};
++use anyhow::{anyhow, Context, Result};
+ use cgroups::freezer::FreezerState;
++use cgroups::CgroupPid;
+ use libc::{self, pid_t};
+ use oci::LinuxResources;
+ use oci_spec::runtime as oci;
+@@ -18,7 +20,7 @@ use std::convert::TryInto;
+ use std::string::String;
+ use std::vec;
+ 
+-use super::super::fs::Manager as FsManager;
++use super::super::fs::{load_cgroup, Manager as FsManager};
+ 
+ use super::cgroups_path::CgroupsPath;
+ use super::common::{CgroupHierarchy, Properties};
+@@ -41,10 +43,22 @@ pub struct Manager {
+ }
+ 
+ impl CgroupManager for Manager {
+-    fn apply(&self, pid: pid_t) -> Result<()> {
++    fn apply(&self, pid: pid_t, init_pid: pid_t) -> Result<()> {
+         if self.dbus_client.unit_exists()? {
+-            let subcgroup = self.fs_manager.subcgroup();
+-            self.dbus_client.add_process(pid, subcgroup)?;
++            let path = exec_cgroup(pid, init_pid, &self.cpath);
++            let container_cgroup = normalize_cgroup_path(&self.cpath);
++            if path == container_cgroup {
++                self.dbus_client.add_process(pid, "/")?;
++            } else if let Some(rel) = path.strip_prefix(&format!("{container_cgroup}/")) {
++                // systemd refuses a subcgroup that is not an absolute path.
++                self.dbus_client.add_process(pid, &format!("/{rel}"))?;
++            } else {
++                // AttachProcessesToUnit only accepts a unit-relative subcgroup.
++                let cgroup = load_cgroup(cgroups::hierarchies::auto(), &path);
++                cgroup
++                    .add_task_by_tgid(CgroupPid::from(pid as u64))
++                    .with_context(|| format!("add task {} to cgroup {}", pid, cgroup.path()))?;
++            }
+         } else {
+             self.dbus_client.start_unit(
+                 (pid as u32).try_into().unwrap(),
+diff --git a/src/agent/rustjail/src/container.rs b/src/agent/rustjail/src/container.rs
+index 34ac1dc..7e27933 100644
+--- a/src/agent/rustjail/src/container.rs
++++ b/src/agent/rustjail/src/container.rs
+@@ -1232,6 +1232,7 @@ impl BaseContainer for LinuxContainer {
+             &st,
+             &mut pipe_w,
+             &mut pipe_r,
++            self.init_process_pid,
+         )
+         .await
+         .map_err(|e| {
+@@ -1587,6 +1588,7 @@ async fn join_namespaces(
+     st: &OCIState,
+     pipe_w: &mut PipeStream,
+     pipe_r: &mut PipeStream,
++    init_pid: pid_t,
+ ) -> Result<()> {
+     let logger = logger.new(o!("action" => "join-namespaces"));
+ 
+@@ -1642,10 +1644,8 @@ async fn join_namespaces(
+     // apply cgroups
+     // For FsManger, it's no matter about the order of apply and set.
+     // For SystemdManger, apply must be precede set because we can only create a systemd unit with specific processes(pids).
+-    if res.is_some() {
+-        info!(logger, "apply processes to cgroups!");
+-        cm.apply(p.pid)?;
+-    }
++    info!(logger, "apply processes to cgroups!");
++    cm.apply(p.pid, init_pid)?;
+ 
+     if p.init {
+         if let Some(resource) = res {
+-- 
+2.53.0
+

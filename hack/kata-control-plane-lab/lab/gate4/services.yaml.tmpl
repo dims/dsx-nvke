@@ -1,0 +1,90 @@
+# Services of gate 4. run.sh fills the ${...} variables.
+# One LoadBalancer Service for each replica. Its address is the node address of the replica:
+# the kubeadm advertise address, the kubelet node IP, and the etcd peer and client address.
+# One more LoadBalancer Service is the shared API endpoint (controlPlaneEndpoint).
+# MetalLB gives each Service the address that the annotation names.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cp-a
+  namespace: ${NS}
+  annotations: {metallb.io/loadBalancerIPs: "${IP_A}"}
+spec:
+  type: LoadBalancer
+  # kubeadm calls the new etcd member and the new API server before the pod is ready.
+  publishNotReadyAddresses: true
+  allocateLoadBalancerNodePorts: false
+  externalTrafficPolicy: ${ETP}
+  selector: {app: cp-a}
+  ports:
+    - {name: api, port: 6443, targetPort: 6443}
+    - {name: etcd-client, port: 2379, targetPort: 2379}
+    - {name: etcd-peer, port: 2380, targetPort: 2380}
+    - {name: kubelet, port: 10250, targetPort: 10250}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cp-b
+  namespace: ${NS}
+  annotations: {metallb.io/loadBalancerIPs: "${IP_B}"}
+spec:
+  type: LoadBalancer
+  publishNotReadyAddresses: true
+  allocateLoadBalancerNodePorts: false
+  externalTrafficPolicy: ${ETP}
+  selector: {app: cp-b}
+  ports:
+    - {name: api, port: 6443, targetPort: 6443}
+    - {name: etcd-client, port: 2379, targetPort: 2379}
+    - {name: etcd-peer, port: 2380, targetPort: 2380}
+    - {name: kubelet, port: 10250, targetPort: 10250}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cp-c
+  namespace: ${NS}
+  annotations: {metallb.io/loadBalancerIPs: "${IP_C}"}
+spec:
+  type: LoadBalancer
+  publishNotReadyAddresses: true
+  allocateLoadBalancerNodePorts: false
+  externalTrafficPolicy: ${ETP}
+  selector: {app: cp-c}
+  ports:
+    - {name: api, port: 6443, targetPort: 6443}
+    - {name: etcd-client, port: 2379, targetPort: 2379}
+    - {name: etcd-peer, port: 2380, targetPort: 2380}
+    - {name: kubelet, port: 10250, targetPort: 10250}
+--- #@peerdns
+# Only with ETCD_PEER_DNS=1. One headless Service for all replicas. Its DNS name gives the pod #@peerdns
+# IP of each replica, also of a replica that is not ready. The name is in each etcd peer #@peerdns
+# certificate, so etcd finds the source address of a peer in the DNS answer. #@peerdns
+apiVersion: v1 #@peerdns
+kind: Service #@peerdns
+metadata: #@peerdns
+  name: cp-peer #@peerdns
+  namespace: ${NS} #@peerdns
+spec: #@peerdns
+  clusterIP: None #@peerdns
+  publishNotReadyAddresses: true #@peerdns
+  selector: {g4-role: control-plane} #@peerdns
+  ports: #@peerdns
+    - {name: etcd-peer, port: 2380, targetPort: 2380} #@peerdns
+---
+# The shared API endpoint. It selects all replicas, and it sends traffic only to a pod that is
+# ready. The readiness probe of the pod is /readyz of its API server. A replica that waits for
+# its join has no API server, so it must not be an endpoint here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cp-api
+  namespace: ${NS}
+  annotations: {metallb.io/loadBalancerIPs: "${IP_API}"}
+spec:
+  type: LoadBalancer
+  allocateLoadBalancerNodePorts: false
+  selector: {g4-role: control-plane}
+  ports:
+    - {name: api, port: 6443, targetPort: 6443}

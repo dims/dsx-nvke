@@ -1,0 +1,110 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# SPIRE server 1.14.1 for the lab, with plain manifests. It is the smallest setup that gives
+# nvke-agent an identity: one server, the join_token node attestor, and a ClusterIP Service.
+# The server keeps its database and its CA key in an emptyDir volume. They stay through a
+# container restart, and a new server pod starts with a new CA. That is acceptable for a lab only.
+# The agents reach the server at spire-server.gate1-nvke-spire.svc:8081 (gRPC with TLS).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gate1-nvke-spire
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-server
+  namespace: gate1-nvke-spire
+data:
+  server.conf: |
+    server {
+      bind_address = "0.0.0.0"
+      bind_port = "8081"
+      trust_domain = "lab.nvke.test"
+      data_dir = "/run/spire/data"
+      socket_path = "/tmp/spire-server/private/api.sock"
+      log_level = "INFO"
+      # The CA lives 24 hours. An X.509 SVID lives 1 hour (the SPIRE default), also for an agent.
+      ca_ttl = "24h"
+      default_x509_svid_ttl = "1h"
+    }
+    plugins {
+      DataStore "sql" {
+        plugin_data {
+          database_type = "sqlite3"
+          connection_string = "/run/spire/data/datastore.sqlite3"
+        }
+      }
+      # NVKE makes one join token for each node (controller/internal/spiffe/join_token.go).
+      NodeAttestor "join_token" {
+        plugin_data {}
+      }
+      KeyManager "disk" {
+        plugin_data {
+          keys_path = "/run/spire/data/keys.json"
+        }
+      }
+    }
+    health_checks {
+      listener_enabled = true
+      bind_address = "0.0.0.0"
+      bind_port = "8080"
+      live_path = "/live"
+      ready_path = "/ready"
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spire-server
+  namespace: gate1-nvke-spire
+spec:
+  type: ClusterIP
+  selector: {app: spire-server}
+  ports:
+    - {name: grpc, port: 8081, targetPort: 8081}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: spire-server
+  namespace: gate1-nvke-spire
+spec:
+  replicas: 1
+  serviceName: spire-server
+  selector:
+    matchLabels: {app: spire-server}
+  template:
+    metadata:
+      labels: {app: spire-server}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # The image runs as user 1000. fsGroup makes the emptyDir volumes writable for it.
+      securityContext: {runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000}
+      containers:
+        - name: spire-server
+          image: ghcr.io/spiffe/spire-server:1.14.1
+          imagePullPolicy: IfNotPresent
+          args: ["-config", "/run/spire/config/server.conf"]
+          ports:
+            - {name: grpc, containerPort: 8081}
+            - {name: health, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /ready, port: health}
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: "1", memory: 256Mi}
+          volumeMounts:
+            - {name: config, mountPath: /run/spire/config, readOnly: true}
+            - {name: data, mountPath: /run/spire/data}
+            - {name: socket, mountPath: /tmp/spire-server/private}
+      volumes:
+        - name: config
+          configMap: {name: spire-server}
+        - name: data
+          emptyDir: {}
+        - name: socket
+          emptyDir: {}

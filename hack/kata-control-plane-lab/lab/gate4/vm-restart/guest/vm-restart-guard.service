@@ -1,0 +1,27 @@
+# Test safety only. It is not a need of a site.
+# The VM has user-mode networking: each packet that follows the default route of the VM leaves
+# through QEMU and becomes a connection of the lab host. This unit keeps private addresses in
+# the VM. Two cases need it:
+# 1. The lab addresses 172.31.0.0/16 are on the Docker bridge br-katavm. While the bridge does
+#    not exist (early in a boot), a packet to such an address would follow the default route.
+# 2. Pods of the kind node call the Service address of the API server (10.96.0.1) before
+#    kube-proxy has its rules. Such a packet has no translation, and the kind node sends it to
+#    its gateway, which is the VM. The sockets of QEMU on the lab host showed 10 connection
+#    tries to 10.96.0.1:443 at each boot.
+# Versions 1 and 2 of this unit used "unreachable" routes. They did not work after a boot:
+# systemd-networkd removes routes that it did not make. Version 3 uses a packet filter table.
+[Unit]
+Description=Lab safety: no packet for a private address leaves the VM
+DefaultDependencies=no
+After=systemd-modules-load.service local-fs.target
+Before=network-pre.target docker.service vm-restart-watch.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/vm-restart-guard.nft
+ExecStop=/usr/sbin/nft delete table inet vm_restart_guard
+
+[Install]
+WantedBy=multi-user.target

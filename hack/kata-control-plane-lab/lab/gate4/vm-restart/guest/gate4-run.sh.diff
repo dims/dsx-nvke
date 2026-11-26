@@ -1,0 +1,50 @@
+--- /home/dsrinivas/notes/hosted/lab/gate4/run.sh	2026-11-26 00:07:58.921947392 -0500
++++ /scratch/kata-cp/work/vm-restart/guest/gate4/run.sh	2026-11-25 23:42:30.926589445 -0500
+@@ -80,19 +80,19 @@
+ 
+ # The replicas: node address, device for /var, device for /var/lib/etcd, size of /var.
+ REPLICAS=(a b c)
+-IP_API=172.30.255.210
+-declare -A IPS=([a]=172.30.255.211 [b]=172.30.255.212 [c]=172.30.255.213)
+-declare -A VAR_LOOPS=([a]=/dev/loop19 [b]=/dev/loop22 [c]=/dev/loop29)
+-declare -A ETCD_LOOPS=([a]=/dev/loop23 [b]=/dev/loop26 [c]=/dev/loop27)
+-declare -A VAR_SIZES=([a]=30Gi [b]=30Gi [c]=20Gi)
+-ETCD_SIZE=10Gi
++IP_API=172.31.255.210
++declare -A IPS=([a]=172.31.255.211 [b]=172.31.255.212 [c]=172.31.255.213)
++declare -A VAR_LOOPS=([a]=/dev/loop20 [b]=/dev/loop21 [c]=/dev/loop22)
++declare -A ETCD_LOOPS=([a]=/dev/loop23 [b]=/dev/loop24 [c]=/dev/loop25)
++declare -A VAR_SIZES=([a]=12Gi [b]=12Gi [c]=12Gi)
++ETCD_SIZE=4Gi
+ # The image file that each device must have in the loop map. No other device is permitted.
+-declare -A EXPECT=([/dev/loop19]=var-0.img [/dev/loop23]=etcd-0.img [/dev/loop22]=var-3.img
+-  [/dev/loop26]=etcd-3.img [/dev/loop29]=spare-0.img [/dev/loop27]=fio-0.img)
++declare -A EXPECT=([/dev/loop20]=var-0.img [/dev/loop23]=etcd-0.img [/dev/loop21]=var-1.img
++  [/dev/loop24]=etcd-1.img [/dev/loop22]=var-2.img [/dev/loop25]=etcd-2.img)
+ if [ "$INSTANCE" = 2 ]; then
+   # The second cluster: the six other devices of the loop map, and four other addresses of the MetalLB pool.
+-  IP_API=172.30.255.220
+-  IPS=([a]=172.30.255.221 [b]=172.30.255.222 [c]=172.30.255.223)
++  IP_API=172.31.255.220
++  IPS=([a]=172.31.255.221 [b]=172.31.255.222 [c]=172.31.255.223)
+   VAR_LOOPS=([a]=/dev/loop20 [b]=/dev/loop21 [c]=/dev/loop30)
+   ETCD_LOOPS=([a]=/dev/loop24 [b]=/dev/loop25 [c]=/dev/loop28)
+   VAR_SIZES=([a]=30Gi [b]=30Gi [c]=20Gi)
+@@ -439,13 +439,10 @@
+ # A loop in the kind node that calls the shared endpoint each second, and a second loop that
+ # calls the Service of each replica. The loops stop when the file $LOOP_DIR/run goes away.
+ #
+-# Each loop runs as a systemd unit of the node, not with "docker exec -d". The kubelet unit of
+-# a kind node does not start while the root cgroup of the node holds a process. On a node that
+-# runs, a process of "docker exec" is in the cgroup /init.scope (measured on 2026-11-26). In
+-# cold start run 1 of 2026-11-25 the script started its loops with "docker exec -d" right
+-# after "docker start". The two loop processes (PIDs 88 and 106) were in the root cgroup, the
+-# kubelet did not start, and the run was not valid. The likely reason: at that moment systemd
+-# of the node had not yet made its cgroups.
++# Each loop runs as a systemd unit of the node, not with "docker exec -d". A process of
++# "docker exec" is in the root cgroup of the node. The kubelet unit of a kind node does not
++# start while the root cgroup holds a process, so a detached loop blocks the kubelet after a
++# start of the node. That fault made cold start run 1 of 2026-11-25 not valid.
+ node_loop() { # node_loop <unit name> <bash script>
+   local unit=$1 script=$2 i
+   for i in $(seq 1 60); do

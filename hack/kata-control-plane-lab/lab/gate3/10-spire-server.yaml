@@ -1,0 +1,162 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Gate 3, paths 2 and 3: a SPIRE server 1.14.1 of its own, with its own trust domain.
+# It is the gate 1 server (lab/gate1-nvke/spire-server.yaml) plus the node attestor k8s_psat.
+# k8s_psat needs the server to call the TokenReview API and to read the pod and the node of
+# the agent, so the server has a ServiceAccount and a ClusterRole.
+# Two cluster names point to the same Kubernetes cluster. The cluster name is part of the
+# agent ID (spiffe://<td>/spire/agent/k8s_psat/<cluster>/<node UID>), so the host agent of
+# path 2 and the agents in the pods of path 3 get different IDs.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gate3-spire
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spire-server
+  namespace: gate3-spire
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gate3-spire-server
+rules:
+  # k8s_psat: validate the projected service account token of an agent.
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+  # k8s_psat: read the pod of the agent (node name, labels) and its node (UID, labels).
+  - apiGroups: [""]
+    resources: ["pods", "nodes"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gate3-spire-server
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gate3-spire-server
+subjects:
+  - kind: ServiceAccount
+    name: spire-server
+    namespace: gate3-spire
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-server
+  namespace: gate3-spire
+data:
+  server.conf: |
+    server {
+      bind_address = "0.0.0.0"
+      bind_port = "8081"
+      trust_domain = "gate3.lab.test"
+      data_dir = "/run/spire/data"
+      socket_path = "/tmp/spire-server/private/api.sock"
+      log_level = "DEBUG"
+      ca_ttl = "24h"
+      default_x509_svid_ttl = "1h"
+      #@agent_ttl
+    }
+    plugins {
+      DataStore "sql" {
+        plugin_data {
+          database_type = "sqlite3"
+          connection_string = "/run/spire/data/datastore.sqlite3"
+        }
+      }
+      NodeAttestor "k8s_psat" {
+        plugin_data {
+          clusters = {
+            # Path 2: the SPIRE agent DaemonSet on the host node (runc).
+            "gate3-host" = {
+              service_account_allow_list = ["gate3-spire:spire-agent"]
+              audience = ["spire-server"]
+            }
+            # Path 3: a SPIRE agent in each control plane pod (Kata guest).
+            "gate3-pods" = {
+              service_account_allow_list = ["gate3:kata-node", "gate3-nvke:kata-node"]
+              audience = ["spire-server"]
+              allowed_pod_label_keys = ["gate3/node-uuid"]
+            }
+          }
+        }
+      }
+      # For the client pod of the gate 1 harness, which has its own agent with a join token.
+      NodeAttestor "join_token" {
+        plugin_data {}
+      }
+      KeyManager "disk" {
+        plugin_data {
+          keys_path = "/run/spire/data/keys.json"
+        }
+      }
+    }
+    health_checks {
+      listener_enabled = true
+      bind_address = "0.0.0.0"
+      bind_port = "8080"
+      live_path = "/live"
+      ready_path = "/ready"
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spire-server
+  namespace: gate3-spire
+spec:
+  type: ClusterIP
+  selector: {app: spire-server}
+  ports:
+    - {name: grpc, port: 8081, targetPort: 8081}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: spire-server
+  namespace: gate3-spire
+spec:
+  replicas: 1
+  serviceName: spire-server
+  selector:
+    matchLabels: {app: spire-server}
+  template:
+    metadata:
+      labels: {app: spire-server}
+    spec:
+      serviceAccountName: spire-server
+      enableServiceLinks: false
+      securityContext: {runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000}
+      containers:
+        - name: spire-server
+          image: ghcr.io/spiffe/spire-server:1.14.1
+          imagePullPolicy: IfNotPresent
+          args: ["-config", "/run/spire/config/server.conf"]
+          ports:
+            - {name: grpc, containerPort: 8081}
+            - {name: health, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /ready, port: health}
+            periodSeconds: 5
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: "1", memory: 256Mi}
+          volumeMounts:
+            - {name: config, mountPath: /run/spire/config, readOnly: true}
+            - {name: data, mountPath: /run/spire/data}
+            - {name: socket, mountPath: /tmp/spire-server/private}
+      volumes:
+        - name: config
+          configMap: {name: spire-server}
+        # The database and the CA key. They stay through a container restart, not through a new pod.
+        - name: data
+          emptyDir: {}
+        - name: socket
+          emptyDir: {}

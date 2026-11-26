@@ -1,0 +1,39 @@
+# Gate 3, path 2: the test pod. It mounts the Workload API socket folder of the host SPIRE agent,
+# with a hostPath volume or with the SPIFFE CSI driver. The container only sleeps. The test
+# commands run with kubectl exec. run-path2.sh fills the ${...} variables and removes the lines
+# of the option that is off.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${POD}
+  namespace: gate3
+  labels: {gate3-test: sock}
+spec:
+  runtimeClassName: ${RUNTIME_CLASS} #@runtimeclass
+  serviceAccountName: sock-test
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 2
+  containers:
+    - name: test
+      image: nvke-node:bcc4376f-amd64
+      imagePullPolicy: Never
+      command: ["/bin/sleep", "infinity"]
+      resources:
+        requests: {cpu: 100m, memory: 512Mi}
+        limits: {cpu: "1", memory: 512Mi}
+      volumeMounts:
+        - {name: spire-socket, mountPath: /spire-agent-socket, readOnly: ${READONLY}}
+        - {name: tools, mountPath: /gate3-bin, readOnly: true}
+        - {name: shared-rw, mountPath: /gate3-shared} #@hostpath
+  volumes:
+    - name: spire-socket
+      hostPath: {path: /run/spire/gate3-agent-sockets, type: Directory} #@hostpath
+      csi: {driver: csi.spiffe.io, readOnly: true} #@csi
+    # The static probe tool, from a folder of the kind node.
+    - name: tools
+      hostPath: {path: /var/lib/gate3/bin, type: Directory}
+    # A writable folder of the kind node, for the reverse test (a socket that a guest process binds).
+    - name: shared-rw #@hostpath
+      hostPath: {path: /var/lib/gate3/shared, type: Directory} #@hostpath

@@ -1,0 +1,30 @@
+# The SPIRE agent configuration that NVKE renders for a node with a join token. It is a copy of
+# controller/internal/clients/capi/capi_spire_agent.conf.tmpl with the joinToken branch.
+# run.sh fills the ${...} variables. The result holds the join token, so it is a secret.
+agent {
+    data_dir = "/var/lib/spire-agent"
+    log_level = "DEBUG"
+
+    server_address = "${SPIRE_SERVER_ADDRESS}"
+    server_port = "${SPIRE_SERVER_PORT}"
+
+    trust_domain = "${TRUST_DOMAIN}"
+    trust_bundle_path = "/etc/spire-agent/initial-trust-bundle.pem"
+
+    join_token = "${JOIN_TOKEN}"
+}
+
+plugins {
+    KeyManager "disk" {
+        plugin_data {
+            directory = "/var/lib/spire-agent"
+        }
+    }
+    NodeAttestor "join_token" {
+        plugin_data {}
+    }
+
+    WorkloadAttestor "unix" {
+        plugin_data {}
+    }
+}

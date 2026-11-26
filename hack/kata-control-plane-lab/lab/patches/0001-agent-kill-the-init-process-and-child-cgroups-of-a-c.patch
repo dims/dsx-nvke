@@ -1,0 +1,300 @@
+From e0f559713b90a77510c2c62fecffd7d5705151de Mon Sep 17 00:00:00 2001
+From: Davanum Srinivas <davanum@gmail.com>
+Date: Wed, 25 Nov 2026 17:57:43 -0500
+Subject: [PATCH 1/2] agent: kill the init process and child cgroups of a
+ container
+
+A SIGKILL for a container with an empty exec ID tells the agent to
+signal all the processes of the container. Since #13163 the agent
+signals only the PIDs that the cgroup manager returns. It no longer
+signals the init process directly.
+
+get_pids() of the cgroupfs manager, which the systemd manager also
+uses, reads the processes of the container cgroup only. With cgroup v2,
+a cgroup that enables controllers for its children cannot hold
+processes. systemd and nested container runtimes therefore move every
+process of the container, PID 1 included, into child cgroups. The list
+is then empty. The agent signals nothing and returns success, so
+`ctr tasks kill -s SIGKILL`, the kill at the end of `crictl stop` and
+a pod delete have no effect on such a container.
+
+Fix both parts:
+
+- get_pids() returns the processes of the container cgroup and of all
+  its descendant cgroups. It reads cgroup.procs, which exists with
+  cgroup v1 and v2 and lists processes, not threads. PID 0, which the
+  kernel prints for a process outside of the PID namespace of the
+  reader, is never returned. LinuxContainer::destroy() uses the same
+  list, so it now also finds processes in child cgroups of a container
+  that shares the PID namespace of the sandbox.
+
+- The agent adds the init process to the PIDs that it signals, unless
+  the process is already reaped. When the container has its own PID
+  namespace, the kernel then kills all its other processes. This does
+  not depend on the cgroup that a process is in.
+
+Fixes: #14062
+Signed-off-by: Davanum Srinivas <davanum@gmail.com>
+---
+ src/agent/rustjail/src/cgroups/fs/mod.rs | 98 +++++++++++++++++++++++-
+ src/agent/src/rpc.rs                     | 69 ++++++++++++++++-
+ 2 files changed, 161 insertions(+), 6 deletions(-)
+
+diff --git a/src/agent/rustjail/src/cgroups/fs/mod.rs b/src/agent/rustjail/src/cgroups/fs/mod.rs
+index 1a82aff..d8d9535 100644
+--- a/src/agent/rustjail/src/cgroups/fs/mod.rs
++++ b/src/agent/rustjail/src/cgroups/fs/mod.rs
+@@ -44,6 +44,7 @@ use std::sync::{Arc, RwLock};
+ use super::DevicesCgroupInfo;
+ 
+ const GUEST_CPUS_PATH: &str = "/sys/devices/system/cpu/online";
++const CGROUP_PROCS: &str = "cgroup.procs";
+ const ROOT_SUBCGROUP: &str = "/";
+ const INIT_SUBCGROUP: &str = "/init/";
+ 
+@@ -225,10 +226,10 @@ impl CgroupManager for Manager {
+ 
+     fn get_pids(&self) -> Result<Vec<pid_t>> {
+         let mem_controller: &MemController = self.cgroup.controller_of().unwrap();
+-        let pids = mem_controller.tasks();
+-        let result = pids.iter().map(|x| x.pid as i32).collect::<Vec<i32>>();
++        let mut pids = Vec::new();
++        collect_pids(mem_controller.path(), &mut pids);
+ 
+-        Ok(result)
++        Ok(pids)
+     }
+ 
+     fn update_cpuset_path(&self, guest_cpuset: &str, container_cpuset: &str) -> Result<()> {
+@@ -1084,6 +1085,40 @@ fn load_cgroup(h: Box<dyn cgroups::Hierarchy>, path: &str) -> Cgroup {
+     cgroups::Cgroup::load(h, valid_path.as_str())
+ }
+ 
++/// Collect the PIDs of the processes in the cgroup directory `dir` and in
++/// all of its descendant cgroups.
++///
++/// `cgroup.procs` lists the processes of one cgroup only, and a container
++/// can move its processes into child cgroups. With cgroup v2 it must do so
++/// before it enables a controller for its children, which is what systemd
++/// or a nested container runtime does. The cgroup of the container itself
++/// is then empty.
++fn collect_pids(dir: &Path, pids: &mut Vec<pid_t>) {
++    // Read errors are not fatal: a cgroup can go away while its parent is
++    // walked, and `cgroup.procs` cannot be read in a threaded cgroup, whose
++    // processes are listed in the threaded domain above it.
++    if let Ok(procs) = fs::read_to_string(dir.join(CGROUP_PROCS)) {
++        pids.extend(
++            procs
++                .lines()
++                .filter_map(|line| line.trim().parse::<pid_t>().ok())
++                // The kernel prints 0 for a process that is not visible in
++                // the PID namespace of the reader. Never return it: a
++                // signal to PID 0 goes to the process group of the caller.
++                .filter(|pid| *pid > 0),
++        );
++    }
++
++    if let Ok(entries) = fs::read_dir(dir) {
++        for entry in entries.flatten() {
++            // The directories of a cgroup directory are its child cgroups.
++            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
++                collect_pids(&entry.path(), pids);
++            }
++        }
++    }
++}
++
+ impl Manager {
+     pub fn new(
+         cpath: &str,
+@@ -1422,6 +1457,7 @@ fn convert_memory_swap_to_v2_value(memory_swap: i64, memory: i64) -> Result<i64>
+ #[cfg(test)]
+ mod tests {
+     use std::collections::HashMap;
++    use std::fs;
+     use std::path::PathBuf;
+     use std::process::Command;
+     use std::sync::{Arc, RwLock};
+@@ -1434,9 +1470,12 @@ mod tests {
+         LinuxResourcesBuilder, SpecBuilder,
+     };
+     use oci_spec::runtime as oci;
++    use tempfile::tempdir;
+     use test_utils::skip_if_not_root;
+ 
+-    use super::{cgroup_path_under_root, default_allowed_devices, load_cgroup};
++    use super::{
++        cgroup_path_under_root, collect_pids, default_allowed_devices, load_cgroup, CGROUP_PROCS,
++    };
+     use crate::cgroups::fs::{
+         get_throttled_time, line_to_vec, lines_to_map, Manager, DEFAULT_ALLOWED_DEVICES, WILDCARD,
+     };
+@@ -1475,6 +1514,57 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn test_collect_pids() {
++        // The layout of a container that runs systemd with cgroup v2: the
++        // cgroup of the container has no process, they are all in child
++        // cgroups.
++        let dir = tempdir().unwrap();
++        let root = dir.path();
++        let cgroups = [
++            ("", ""),
++            ("init.scope", "1\n"),
++            ("system.slice", ""),
++            ("system.slice/containerd.service", "120\n121\n"),
++            // PID 0 is a process outside of the PID namespace of the reader.
++            ("kubelet.slice/kubelet-kubepods.slice/pod", "0\n300\n"),
++        ];
++        for (cgroup, procs) in cgroups {
++            let path = root.join(cgroup);
++            fs::create_dir_all(&path).unwrap();
++            fs::write(path.join(CGROUP_PROCS), procs).unwrap();
++        }
++        // A cgroup without a readable `cgroup.procs` still has its children
++        // walked.
++        fs::create_dir_all(root.join("threaded/domain")).unwrap();
++        fs::write(root.join("threaded/domain").join(CGROUP_PROCS), "400\n").unwrap();
++        // The other files of a cgroup directory are not cgroups.
++        fs::write(root.join("cgroup.controllers"), "cpu memory pids\n").unwrap();
++
++        let test_cases = [
++            (
++                "container cgroup with all processes in child cgroups",
++                "",
++                vec![1, 120, 121, 300, 400],
++            ),
++            (
++                "child cgroup with a grandchild",
++                "system.slice",
++                vec![120, 121],
++            ),
++            ("leaf cgroup", "init.scope", vec![1]),
++            ("cgroup without cgroup.procs", "threaded", vec![400]),
++            ("cgroup that does not exist", "no-such-cgroup", vec![]),
++        ];
++
++        for (name, cgroup, expected) in test_cases {
++            let mut pids = Vec::new();
++            collect_pids(&root.join(cgroup), &mut pids);
++            pids.sort_unstable();
++            assert_eq!(pids, expected, "test case: {}", name);
++        }
++    }
++
+     #[test]
+     fn test_line_to_vec() {
+         let test_cases = vec![
+diff --git a/src/agent/src/rpc.rs b/src/agent/src/rpc.rs
+index 3226e0d..a0aa7ba 100644
+--- a/src/agent/src/rpc.rs
++++ b/src/agent/src/rpc.rs
+@@ -581,7 +581,8 @@ impl AgentService {
+                 Ok(()) => (),
+             }
+         } else {
+-            // Signalling all processes in the cgroup
++            // Signalling all processes of the container: the init process
++            // and the processes in the cgroup
+             info!(
+                 sl(),
+                 "signal all the remaining processes";
+@@ -635,12 +636,25 @@ impl AgentService {
+         ctr.cgroup_manager.as_ref().freeze(state)
+     }
+ 
++    // Returns the PIDs of all the processes of a container: the processes in
++    // its cgroup and its init process.
+     async fn get_pids(&self, cid: &str) -> Result<Vec<i32>> {
+         let mut sandbox = self.sandbox.lock().await;
+         let ctr = sandbox
+             .get_container(cid)
+             .ok_or_else(|| anyhow!("Invalid container id {}", cid))?;
+-        ctr.cgroup_manager.as_ref().get_pids()
++        let pids = ctr.cgroup_manager.as_ref().get_pids()?;
++
++        // A process that was reaped has no exit_tx. Its PID can belong to
++        // another process by now, so it must not get a signal.
++        let init_pid = ctr.init_process_pid;
++        let init_pid = ctr
++            .processes
++            .values()
++            .find(|p| p.pid == init_pid && p.exit_tx.is_some())
++            .map(|p| p.pid);
++
++        Ok(with_init_pid(pids, init_pid))
+     }
+ 
+     #[instrument]
+@@ -2238,6 +2252,23 @@ fn append_guest_hooks(s: &Sandbox, oci: &mut Spec) -> Result<()> {
+     Ok(())
+ }
+ 
++// Adds the init process of a container to the PIDs that a request to signal
++// all the processes of the container targets.
++//
++// The init process must always get the signal. When the container has its
++// own PID namespace, the kernel then kills all the other processes of the
++// container. The cgroup manager is not a reliable source for it: the init
++// process can be in a cgroup that the manager does not list.
++fn with_init_pid(mut pids: Vec<pid_t>, init_pid: Option<pid_t>) -> Vec<pid_t> {
++    if let Some(init_pid) = init_pid {
++        if !pids.contains(&init_pid) {
++            pids.push(init_pid);
++        }
++    }
++
++    pids
++}
++
+ // Check if the container process installed the
+ // handler for specific signal.
+ fn is_signal_handled(proc_status_file: &str, signum: u32) -> bool {
+@@ -3551,6 +3582,40 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn test_with_init_pid() {
++        let test_cases = [
++            (
++                "init process that the cgroup manager does not list",
++                vec![],
++                Some(10),
++                vec![10],
++            ),
++            (
++                "init process added to the cgroup processes",
++                vec![11, 12],
++                Some(10),
++                vec![11, 12, 10],
++            ),
++            (
++                "init process already in the cgroup processes",
++                vec![10, 11],
++                Some(10),
++                vec![10, 11],
++            ),
++            ("no init process", vec![11, 12], None, vec![11, 12]),
++        ];
++
++        for (name, pids, init_pid, expected) in test_cases {
++            assert_eq!(
++                with_init_pid(pids, init_pid),
++                expected,
++                "test case: {}",
++                name
++            );
++        }
++    }
++
+     #[tokio::test]
+     async fn test_is_signal_handled() {
+         #[derive(Debug)]
+
+base-commit: f9cbda4d235b345340bf461e4aaba8c89e841d8d
+-- 
+2.53.0
+

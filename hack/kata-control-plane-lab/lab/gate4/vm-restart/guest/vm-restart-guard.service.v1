@@ -1,0 +1,19 @@
+# Test safety only. It is not a need of a site.
+# The lab addresses 172.31.0.0/16 are on the Docker bridge br-katavm. While the bridge does not
+# exist (early in a boot), a packet to such an address would follow the default route and leave
+# the VM through the user-mode network of QEMU. This route stops such a packet in the VM.
+# The route of the bridge has a lower metric and wins when the bridge exists.
+[Unit]
+Description=Lab safety: no packet for the lab subnet leaves the VM
+DefaultDependencies=no
+After=systemd-modules-load.service
+Before=network-pre.target docker.service vm-restart-watch.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/ip route replace unreachable 172.31.0.0/16 metric 4000000000
+
+[Install]
+WantedBy=multi-user.target

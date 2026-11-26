@@ -1,0 +1,101 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Extra RuntimeClass objects for the memory overhead test of the Kata Rust runtime.
+# Each one has the handler, the CPU overhead and the node selector of the stock object
+# kata-clh-runtime-rs (kata-deploy 4.4.0). Only the memory overhead is different.
+# A RuntimeClass is a Kubernetes object that names a handler, so these objects change
+# no Kata file and need no containerd restart. The kubelet adds the memory overhead to
+# the memory limit of the pod cgroup. The Kata runtime does not read it.
+# Remove them with: kubectl delete runtimeclass -l lab=gate1-nvke-overhead
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: kata-clh-runtime-rs-ovh192
+  labels: {lab: gate1-nvke-overhead}
+handler: kata-clh-runtime-rs
+overhead:
+  podFixed: {cpu: 250m, memory: 192Mi}
+scheduling:
+  nodeSelector:
+    kata-deploy.katacontainers.io/default: "true"
+    katacontainers.io/kata-runtime: "true"
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: kata-clh-runtime-rs-ovh256
+  labels: {lab: gate1-nvke-overhead}
+handler: kata-clh-runtime-rs
+overhead:
+  podFixed: {cpu: 250m, memory: 256Mi}
+scheduling:
+  nodeSelector:
+    kata-deploy.katacontainers.io/default: "true"
+    katacontainers.io/kata-runtime: "true"
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: kata-clh-runtime-rs-ovh384
+  labels: {lab: gate1-nvke-overhead}
+handler: kata-clh-runtime-rs
+overhead:
+  podFixed: {cpu: 250m, memory: 384Mi}
+scheduling:
+  nodeSelector:
+    kata-deploy.katacontainers.io/default: "true"
+    katacontainers.io/kata-runtime: "true"
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: kata-clh-runtime-rs-ovh512
+  labels: {lab: gate1-nvke-overhead}
+handler: kata-clh-runtime-rs
+overhead:
+  podFixed: {cpu: 250m, memory: 512Mi}
+scheduling:
+  nodeSelector:
+    kata-deploy.katacontainers.io/default: "true"
+    katacontainers.io/kata-runtime: "true"
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: kata-clh-runtime-rs-ovh1g
+  labels: {lab: gate1-nvke-overhead}
+handler: kata-clh-runtime-rs
+overhead:
+  podFixed: {cpu: 250m, memory: 1Gi}
+scheduling:
+  nodeSelector:
+    kata-deploy.katacontainers.io/default: "true"
+    katacontainers.io/kata-runtime: "true"
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: kata-clh-runtime-rs-ovh2g
+  labels: {lab: gate1-nvke-overhead}
+handler: kata-clh-runtime-rs
+overhead:
+  podFixed: {cpu: 250m, memory: 2Gi}
+scheduling:
+  nodeSelector:
+    kata-deploy.katacontainers.io/default: "true"
+    katacontainers.io/kata-runtime: "true"
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: kata-clh-runtime-rs-ovh160
+  labels: {lab: gate1-nvke-overhead}
+handler: kata-clh-runtime-rs
+overhead:
+  podFixed: {cpu: 250m, memory: 160Mi}
+scheduling:
+  nodeSelector:
+    kata-deploy.katacontainers.io/default: "true"
+    katacontainers.io/kata-runtime: "true"

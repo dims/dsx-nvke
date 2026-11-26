@@ -1,0 +1,87 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Gate 3, path 2: the SPIFFE CSI driver 0.2.7 with the node driver registrar v2.15.0. These are
+# the versions that NVKE pins (cli/internal/bootstrap/manifest/bootstrap-manifest.yaml, lines 83 to 86).
+# The manifest follows the upstream example (spiffe-csi, example/config/spiffe-csi-driver.yaml).
+# The driver makes a read-only bind mount of the socket folder of the host SPIRE agent
+# (/run/spire/gate3-agent-sockets in the kind node) into the volume folder of the pod.
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: csi.spiffe.io
+spec:
+  attachRequired: false
+  podInfoOnMount: true
+  fsGroupPolicy: None
+  volumeLifecycleModes:
+    - Ephemeral
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spiffe-csi-driver
+  namespace: gate3-spire
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: spiffe-csi-driver
+  namespace: gate3-spire
+spec:
+  selector:
+    matchLabels: {app: spiffe-csi-driver}
+  template:
+    metadata:
+      labels: {app: spiffe-csi-driver}
+    spec:
+      serviceAccountName: spiffe-csi-driver
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: spiffe-csi-driver
+          image: ghcr.io/spiffe/spiffe-csi-driver:0.2.7
+          imagePullPolicy: IfNotPresent
+          args:
+            - -workload-api-socket-dir
+            - /spire-agent-socket
+            - -csi-socket-path
+            - /spiffe-csi/csi.sock
+          env:
+            - name: MY_NODE_NAME
+              valueFrom:
+                fieldRef: {fieldPath: spec.nodeName}
+          securityContext:
+            privileged: true
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+          volumeMounts:
+            - {name: spire-agent-socket-dir, mountPath: /spire-agent-socket, readOnly: true}
+            - {name: spiffe-csi-socket-dir, mountPath: /spiffe-csi}
+            - {name: mountpoint-dir, mountPath: /var/lib/kubelet/pods, mountPropagation: Bidirectional}
+        - name: node-driver-registrar
+          image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.15.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - -csi-address
+            - /spiffe-csi/csi.sock
+            - -kubelet-registration-path
+            - /var/lib/kubelet/plugins/csi.spiffe.io/csi.sock
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 200m, memory: 64Mi}
+          volumeMounts:
+            - {name: spiffe-csi-socket-dir, mountPath: /spiffe-csi}
+            - {name: kubelet-plugin-registration-dir, mountPath: /registration}
+      volumes:
+        - name: spire-agent-socket-dir
+          hostPath: {path: /run/spire/gate3-agent-sockets, type: Directory}
+        - name: spiffe-csi-socket-dir
+          hostPath: {path: /var/lib/kubelet/plugins/csi.spiffe.io, type: DirectoryOrCreate}
+        - name: mountpoint-dir
+          hostPath: {path: /var/lib/kubelet/pods, type: Directory}
+        - name: kubelet-plugin-registration-dir
+          hostPath: {path: /var/lib/kubelet/plugins_registry, type: Directory}

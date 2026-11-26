@@ -1,0 +1,4 @@
+/etc/kubernetes/patches/kubeletconfiguration0+merge.yaml kubeletconfiguration0+merge.yaml 0644 root:root
+/etc/kubernetes/patches/kube-apiserver-base-graceful-shutdown+merge.yaml kube-apiserver-base-graceful-shutdown+merge.yaml 0644 root:root
+/etc/kubernetes/policies/audit-policy.yaml audit-policy.yaml 0644 root:root
+/etc/kubernetes/oidc/auth-config.yaml auth-config.yaml 0600 root:root

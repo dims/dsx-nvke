@@ -1,0 +1,155 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The kubeadm configuration that the NVKE controller renders for the first control plane node.
+# It is one output of ../render/render.sh, which calls the renderer of the controller at commit
+# bcc4376f (controller/internal/kubeadmconfig, InitConfig.Render). The lab sends it as init_config
+# in ExecuteKubeadmInit. Each run makes a new one for the pod IP of the run.
+# This copy is from the run a2-runc-mtls-dev1 (pod IP 10.244.0.71). The bootstrap token is replaced.
+# Settings: Kubernetes v1.36.4, no container mode, skip of the kube-proxy addon. files.txt lists the
+# four files of the request. The kubelet patch has 1Gi and 512Mi (the NVKE defaults are 16Gi and 2Gi).
+apiVersion: kubeadm.k8s.io/v1beta4
+bootstrapTokens:
+- groups:
+  - system:bootstrappers:kubeadm:default-node-token
+  token: REDACTED
+  ttl: 24h0m0s
+  usages:
+  - signing
+  - authentication
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: 10.244.0.71
+  bindPort: 6443
+nodeRegistration:
+  criSocket: unix:///var/run/containerd/containerd.sock
+  imagePullPolicy: IfNotPresent
+  kubeletExtraArgs:
+  - name: node-ip
+    value: 10.244.0.71
+  name: nvke-cp
+  taints: null
+patches:
+  directory: /etc/kubernetes/patches
+skipPhases:
+- addon/kube-proxy
+timeouts:
+  controlPlaneComponentHealthCheck: 4m0s
+---
+apiServer:
+  extraArgs:
+  - name: audit-log-maxage
+    value: "30"
+  - name: audit-log-maxbackup
+    value: "10"
+  - name: audit-log-maxsize
+    value: "100"
+  - name: audit-log-path
+    value: /var/log/kubernetes_audit/audit.log
+  - name: audit-policy-file
+    value: /etc/kubernetes/policies/audit-policy.yaml
+  - name: authentication-config
+    value: /etc/kubernetes/oidc/auth-config.yaml
+  - name: bind-address
+    value: 0.0.0.0
+  - name: enable-admission-plugins
+    value: NodeRestriction,DenyServiceExternalIPs,OwnerReferencesPermissionEnforcement,PodNodeSelector,PodTolerationRestriction
+  - name: etcd-compaction-interval
+    value: 5m
+  - name: kubelet-certificate-authority
+    value: /etc/kubernetes/pki/ca.crt
+  - name: profiling
+    value: "false"
+  - name: service-account-extend-token-expiration
+    value: "false"
+  - name: shutdown-delay-duration
+    value: 10s
+  - name: shutdown-send-retry-after
+    value: "true"
+  - name: shutdown-watch-termination-grace-period
+    value: 20s
+  - name: tls-cipher-suites
+    value: TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+  extraVolumes:
+  - hostPath: /var/log/kubernetes_audit
+    mountPath: /var/log/kubernetes_audit
+    name: audit-logs
+    pathType: DirectoryOrCreate
+  - hostPath: /etc/kubernetes/policies
+    mountPath: /etc/kubernetes/policies
+    name: audit-policies
+    pathType: DirectoryOrCreate
+    readOnly: true
+  - hostPath: /etc/kubernetes/oidc
+    mountPath: /etc/kubernetes/oidc
+    name: oidc-auth-config
+    pathType: DirectoryOrCreate
+    readOnly: true
+apiVersion: kubeadm.k8s.io/v1beta4
+certificatesDir: /etc/kubernetes/pki
+clusterName: kubernetes
+controlPlaneEndpoint: 10.244.0.71
+controllerManager:
+  extraArgs:
+  - name: bind-address
+    value: 127.0.0.1
+  - name: large-cluster-size-threshold
+    value: "50"
+  - name: profiling
+    value: "false"
+  - name: secondary-node-eviction-rate
+    value: "0"
+  - name: terminated-pod-gc-threshold
+    value: "12500"
+dns: {}
+etcd:
+  local:
+    dataDir: /var/lib/etcd
+    extraArgs:
+    - name: auto-compaction-retention
+      value: "1"
+    - name: bootstrap-defrag-threshold-megabytes
+      value: "200"
+    - name: listen-metrics-urls
+      value: http://0.0.0.0:2381
+    - name: quota-backend-bytes
+      value: "17179869184"
+imageRepository: registry.k8s.io
+kind: ClusterConfiguration
+kubernetesVersion: v1.36.4
+networking:
+  dnsDomain: cluster.local
+  podSubnet: 10.113.0.0/16
+  serviceSubnet: 10.112.0.0/16
+proxy: {}
+scheduler:
+  extraArgs:
+  - name: bind-address
+    value: 127.0.0.1
+  - name: profiling
+    value: "false"
+---
+apiVersion: kubeproxy.config.k8s.io/v1alpha1
+kind: KubeProxyConfiguration
+metricsBindAddress: 0.0.0.0:10249
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+kubeReserved:
+  cpu: 1000m
+  ephemeral-storage: 1Gi
+  memory: 2Gi
+maxParallelImagePulls: 4
+podPidsLimit: 16384
+seccompDefault: true
+serializeImagePulls: false
+serverTLSBootstrap: true
+systemReserved:
+  memory: 16Gi
+tlsCipherSuites:
+- TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+- TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+- TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+- TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+- TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+- TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256

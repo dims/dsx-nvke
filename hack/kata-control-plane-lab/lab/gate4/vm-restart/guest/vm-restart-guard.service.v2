@@ -1,0 +1,27 @@
+# Test safety only. It is not a need of a site.
+# The VM has user-mode networking: each packet that follows the default route of the VM leaves
+# through QEMU and becomes a connection of the lab host. This unit keeps private addresses in
+# the VM. Two cases need it:
+# 1. The lab addresses 172.31.0.0/16 are on the Docker bridge br-katavm. While the bridge does
+#    not exist (early in a boot), a packet to such an address would follow the default route.
+# 2. Pods of the kind node call the Service address of the API server (10.96.0.1) before
+#    kube-proxy has its rules. Such a packet has no translation, and the kind node sends it to
+#    its gateway, which is the VM. Version 1 of this unit had only case 1, and the sockets of
+#    QEMU on the lab host showed 10 connection tries to 10.96.0.1:443 at each boot.
+# A route of a Docker bridge or of the QEMU network is more specific and wins.
+[Unit]
+Description=Lab safety: no packet for a private address leaves the VM
+DefaultDependencies=no
+After=systemd-modules-load.service
+Before=network-pre.target docker.service vm-restart-watch.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/ip route replace unreachable 10.0.0.0/8 metric 4000000000
+ExecStart=/usr/sbin/ip route replace unreachable 172.16.0.0/12 metric 4000000000
+ExecStart=/usr/sbin/ip route replace unreachable 192.168.0.0/16 metric 4000000000
+
+[Install]
+WantedBy=multi-user.target
