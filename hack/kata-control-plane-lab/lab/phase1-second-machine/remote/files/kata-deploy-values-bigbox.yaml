@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Extra values for the kata-deploy chart 4.4.0 on the-second-machine, on top of the lab values.
+# 1. The firewall of the machine drops a new connection from a Docker bridge to the internet,
+#    so a kind node cannot pull. The images are loaded into each node before the install, and
+#    the chart must not ask for a pull (its default is Always).
+imagePullPolicy: IfNotPresent
+# 2. The control plane node of a kind cluster with workers has the control-plane taint.
+#    Without a toleration the chart installs Kata on the workers only.
+tolerations:
+  - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}

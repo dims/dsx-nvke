@@ -1,0 +1,19 @@
+# The shared API endpoint of phase 1 step 7 (the controlPlaneEndpoint of the request).
+# The form of the Service cp-api of gate 4. It selects the three host pods, and it sends
+# traffic only to a pod that is ready (no publishNotReadyAddresses). The readiness probe of a
+# host pod is /readyz of its API server, each 2 s (podspec.inc). So a pod with no API server
+# is no endpoint: before and during kubeadm init the Service has no endpoint or only the first
+# node, and a node that waits for its join gets no call.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cp-api
+  namespace: ${NS}
+  annotations: {metallb.io/loadBalancerIPs: "${IP_API}"}
+spec:
+  type: LoadBalancer
+  allocateLoadBalancerNodePorts: false
+  externalTrafficPolicy: ${ETP}
+  selector: {p1-role: control-plane}
+  ports:
+    - {name: api, port: 6443, targetPort: 6443}

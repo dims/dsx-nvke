@@ -1,0 +1,18 @@
+# The same control plane node as a bare Pod with the name ${NAME}. It uses the claims that the
+# StatefulSet form made (var-${NAME}-0 and etcd-${NAME}-0). Nothing in the host cluster makes
+# this pod again after a delete. The owner (run.sh here, a provider in NVKE) applies it again.
+# run.sh puts the pod spec of podspec.inc at the line "#@podspec" and adds the two claim volumes.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${NAME}
+  namespace: ${NS}
+  labels: {app: ${NAME}, g4-role: control-plane}
+  annotations: #@fixed
+    k8s.v1.cni.cncf.io/networks: '[{"name": "nodenet", "ips": ["${NODE_IP}/16"]${POD_MAC}}]' #@fixed
+spec:
+#@podspec
+    - name: var
+      persistentVolumeClaim: {claimName: var-${NAME}-0}
+    - name: etcd
+      persistentVolumeClaim: {claimName: etcd-${NAME}-0}

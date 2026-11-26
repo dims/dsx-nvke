@@ -1,0 +1,38 @@
+# One test pod on the pod network of one node, and one ClusterIP Service that selects only this pod.
+# The pod is bound to the node with nodeName. It uses the OVN image of the node (python3, curl), so
+# the node pulls nothing. It serves HTTP on port 8080. run.sh fills the ${...} variables.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: p1-t-${R}
+  namespace: default
+  labels: {app: p1-t, p1-node: "${R}"}
+spec:
+  nodeName: ${NODE_NAME}
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 2
+  automountServiceAccountToken: false
+  tolerations:
+    - {operator: Exists}
+  containers:
+    - name: test
+      image: ${TEST_IMAGE}
+      imagePullPolicy: Never
+      command: ["python3", "-m", "http.server", "8080", "--directory", "/probe"]
+      resources:
+        requests: {cpu: 10m, memory: 32Mi}
+      volumeMounts:
+        - {name: probe, mountPath: /probe, readOnly: true}
+  volumes:
+    - name: probe
+      configMap: {name: p1-probe}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: p1-t-${R}
+  namespace: default
+spec:
+  selector: {p1-node: "${R}"}
+  ports:
+    - {port: 80, targetPort: 8080, protocol: TCP}

@@ -1,0 +1,33 @@
+# Loop device nodes for the kind node of the lab (container kata-cp-control-plane).
+#
+# Why. The kubelet attaches one loop device for each raw block volume (losetup -f). The kernel
+# makes a new loop device on request, but the /dev of a container does not get its node.
+# lab/01-node-prep.sh makes the nodes /dev/loop0 to /dev/loop127 by hand with mknod. Docker
+# makes a new /dev at each start of the container, so the nodes are lost at "docker stop".
+# This unit makes them again at each start of the node, before the kubelet starts.
+#
+# The D-Bus part of 01-node-prep.sh needs no unit. The package dbus is in the root filesystem
+# of the container, which stays through a stop, and systemd starts dbus.socket at boot.
+#
+# Install (in the kind node, one time; the unit file stays through a stop of the container):
+#   docker cp ~/notes/hosted/lab/gate4/g4-loop-nodes.service kata-cp-control-plane:/etc/systemd/system/g4-loop-nodes.service
+#   docker exec kata-cp-control-plane systemctl daemon-reload
+#   docker exec kata-cp-control-plane systemctl enable g4-loop-nodes.service
+# Remove:
+#   docker exec kata-cp-control-plane systemctl disable g4-loop-nodes.service
+#   docker exec kata-cp-control-plane rm /etc/systemd/system/g4-loop-nodes.service
+#
+# "$$" is the systemd form of "$" in a command line.
+[Unit]
+Description=Lab: loop device nodes for raw block volumes
+DefaultDependencies=no
+After=local-fs.target
+Before=kubelet.service containerd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'i=0; while [ $$i -le 127 ]; do [ -e /dev/loop$$i ] || { mknod -m 660 /dev/loop$$i b 7 $$i && chgrp disk /dev/loop$$i; }; i=$$((i+1)); done; echo "loop device nodes: $$(ls /dev/loop[0-9]* | wc -l)"'
+
+[Install]
+WantedBy=multi-user.target

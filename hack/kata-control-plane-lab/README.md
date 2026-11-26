@@ -1,5 +1,7 @@
 # Kata control plane lab, phase 0 and phase 1
 
+Phase 1 is complete on 2026-11-26. Start with `results/phase1-results.md`.
+
 This folder is the record of a lab. The lab tests if one NVKE control plane node can run as one Kata pod: systemd, containerd, the kubelet and `nvke-agent` in the guest of a Kata VM, with the kubeadm static pods inside it. The pods run on a host cluster, and NVKE joins them as hosts that exist.
 
 It is a lab record, not product code. No build and no CI job uses it.
@@ -16,7 +18,7 @@ It is a lab record, not product code. No build and no CI job uses it.
 
 Phase 0 is complete. Start with `results/phase0-results.md`. It has the gate table, the recommendation, the numbers, each defect with its fix, and what the lab cannot answer.
 
-Phase 1 meets its pass rule. Its goal is a cluster that NVKE makes with three control plane nodes on three Kata pods, with code that exists: NVKE joins the pods through its `infra` path with `cluster-api-provider-provisioned`. NVKE reports the cluster as provisioned in 3 of 3 runs from empty volumes. The shared LoadBalancer address as the endpoint also passes, with a new request field in NVKE. One point is still in work: pod traffic between the control plane pods.
+Phase 1 meets its pass rule. Its goal is a cluster that NVKE makes with three control plane nodes on three Kata pods, with code that exists: NVKE joins the pods through its `infra` path with `cluster-api-provider-provisioned`. NVKE reports the cluster as provisioned in 3 of 3 runs from empty volumes. The shared LoadBalancer address as the endpoint also passes, with a new request field in NVKE. Pod traffic between the control plane pods fails with a LoadBalancer address for each pod and passes with a fixed address for each pod. `results/phase1-results.md` has both address designs with their costs.
 
 | Step of phase 1 | State |
 |---|---|
@@ -26,7 +28,7 @@ Phase 1 meets its pass rule. Its goal is a cluster that NVKE makes with three co
 | 1c. A dry run of the full flow with three nodes, with a lab client as the controller | Pass. Pod traffic between two nodes fails, for two causes |
 | 4. The helper that copies the bootstrap data of NVKE into a pod | Pass |
 | 5. The cluster through the NVKE controller, three times from empty volumes | Pass, 3 of 3 |
-| 6. Pod traffic between the control plane pods | In work: a test with a fixed address and no NAT for each pod. The network and the control plane with stock etcd settings pass. The pod traffic test is in work |
+| 6. Pod traffic between the control plane pods | 0 of 6 directions with a LoadBalancer address for each pod. 6 of 6 with a fixed address and no NAT for each pod and a guest kernel that has Open vSwitch and Geneve, also with the NVKE controller (2 of 2 runs on a second test machine) |
 | 7. The shared LoadBalancer address as the endpoint | Pass, 2 of 2 runs. The NVKE change is on the branch `feat/control-plane-endpoint` of this fork |
 
 ## Content
@@ -48,7 +50,8 @@ Phase 1 meets its pass rule. Its goal is a cluster that NVKE makes with three co
 | `lab/phase1-cluster/` | Phase 1, step 5: the draft of the cluster request |
 | `lab/phase1-run/` | Phase 1, step 5: the three runs through the NVKE controller, and the delete procedure |
 | `lab/phase1-endpoint-run/` | Phase 1, step 7: the controller change to the branch image, the gate checks, two runs with the shared address, and the replace of the first node |
-| `lab/phase1-fixed-address/` | Phase 1, step 6: result files of the test with a fixed address and no NAT, from a second test machine |
+| `lab/phase1-fixed-address/` | Phase 1, step 6: result files of the test with a fixed address and no NAT, from a second test machine (C1 the network, C2 the control plane with stock etcd settings, C3 pod traffic, D the NVKE controller) |
+| `lab/phase1-second-machine/` | The report, the scripts and the guest kernel config fragment of the second test machine: gate 4 across three host nodes, host node loss, and the fixed address tests. The address and the name of the machine are placeholders |
 | `lab/patches/` | Two patches to the Kata agent. The same commits are on the branch `lab/agent-kill-child-cgroups` of `github.com/dims/kata-containers` |
 | `results/` | The results of phase 0 and the source readings. `phase1-source-reading.md` has the NVKE source facts for phase 1. `phase1-endpoint-plan.md` and `phase1-endpoint-change.md` are the plan and the report for the request field `controlPlaneEndpoint` |
 

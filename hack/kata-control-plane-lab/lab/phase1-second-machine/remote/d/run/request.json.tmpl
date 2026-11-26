@@ -1,0 +1,36 @@
+{
+  "name": "${CLUSTER_NAME}",
+  "controlPlaneKubernetesVersion": "1.36.4",
+  "cniPlugin": "ovn-kubernetes",
+  "cniVersion": "2.4.2",
+  "etcdEncrypted": false,
+  "network": {
+    "podCIDR": "${POD_CIDR}",
+    "serviceCIDR": "${SERVICE_CIDR}"
+  },
+  "controlPlaneConfig": {
+    "desiredCount": 3,
+    "systemReservedMemory": "512Mi",
+    "infra": {
+      "machineTemplate": {
+        "apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha1",
+        "kind": "ProvisionedMachineTemplate",
+        "spec": {"template": {"spec": {}}}
+      }
+    }
+  },
+  "infra": {
+    "cluster": {
+      "apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha1",
+      "kind": "ProvisionedCluster",
+      "metadata": {"name": "${CLUSTER_NAME}"},
+      "spec": {
+        "hosts": [
+          {"hostname": "${HOST_A}", "ipAddress": "${IP_A}"},
+          {"hostname": "${HOST_B}", "ipAddress": "${IP_B}"},
+          {"hostname": "${HOST_C}", "ipAddress": "${IP_C}"}
+        ]
+      }
+    }
+  }
+}

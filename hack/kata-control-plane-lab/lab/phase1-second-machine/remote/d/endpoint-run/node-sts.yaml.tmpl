@@ -1,0 +1,44 @@
+# One control plane node as a StatefulSet with one replica. The pod is ${NAME}-0.
+# run.sh fills the ${...} variables, removes the lines of an option that is off (tags "#@..."),
+# and puts the pod spec of podspec.inc at the line "#@podspec".
+# - The StatefulSet controller of the host cluster makes the pod again after a delete, with the
+#   same name and the same claims.
+# - updateStrategy OnDelete: a template change does not restart the node. NVKE replaces a node
+#   and never changes it in place.
+# - The claims come from the claim templates and bind to the local volumes (volumes.yaml.tmpl).
+# - serviceName names the LoadBalancer Service of the replica. No headless Service is necessary,
+#   because nothing uses the DNS name of the pod.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ${NAME}
+  namespace: ${NS}
+spec:
+  replicas: 1
+  serviceName: ${NAME}
+  updateStrategy: {type: OnDelete}
+  selector:
+    matchLabels: {app: ${NAME}}
+  template:
+    metadata:
+      # nvke.lab/host is the hostname of this host in the inventory of the ProvisionedCluster.
+      # The lab bootstrap helper finds the pod of a bound machine by this label.
+      labels: {app: ${NAME}, p1-role: control-plane, nvke.lab/host: ${HOST_NAME}}
+      # Block D: one more interface (net1) on the node network, with the fixed address and hardware address of this host.
+      annotations:
+        k8s.v1.cni.cncf.io/networks: '[{"name": "nodenet", "ips": ["${NODE_IP}/16"]${POD_MAC}}]'
+    spec:
+#@podspec
+  volumeClaimTemplates:
+    - metadata: {name: var}
+      spec:
+        volumeMode: Block
+        accessModes: [ReadWriteOnce]
+        storageClassName: ${NS}-local-block
+        resources: {requests: {storage: ${VAR_SIZE}}}
+    - metadata: {name: etcd}
+      spec:
+        volumeMode: Block
+        accessModes: [ReadWriteOnce]
+        storageClassName: ${NS}-local-block
+        resources: {requests: {storage: ${ETCD_SIZE}}}

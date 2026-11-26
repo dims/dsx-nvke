@@ -1,0 +1,44 @@
+# Runtime handlers for the Kata guest image with the patched kata-agent (lab).
+# Each handler is a copy of the stock handler in
+# /opt/kata/containerd/config.d/kata-deploy.toml with another ConfigPath.
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-clh-fix]
+runtime_type = "io.containerd.kata-clh-fix.v2"
+runtime_path = "/opt/kata/bin/containerd-shim-kata-v2"
+privileged_without_host_devices = true
+pod_annotations = ["io.katacontainers.config.hypervisor.enable_iommu", "io.katacontainers.config.hypervisor.kernel_params", "io.katacontainers.config.hypervisor.kernel_verity_params"]
+container_annotations = ["io.kubernetes.container.terminationMessage*"]
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-clh-fix.options]
+ConfigPath = "/opt/kata-fix/configuration-clh-fix.toml"
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-clh-runtime-rs-fix]
+runtime_type = "io.containerd.kata-clh-runtime-rs-fix.v2"
+runtime_path = "/opt/kata/runtime-rs/bin/containerd-shim-kata-v2"
+privileged_without_host_devices = true
+pod_annotations = ["io.katacontainers.config.hypervisor.default_memory", "io.katacontainers.config.hypervisor.default_vcpus", "io.katacontainers.config.hypervisor.enable_iommu", "io.katacontainers.config.hypervisor.kernel_params", "io.katacontainers.config.hypervisor.kernel_verity_params"]
+container_annotations = ["io.kubernetes.container.terminationMessage*"]
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-clh-runtime-rs-fix.options]
+ConfigPath = "/opt/kata-fix/configuration-clh-runtime-rs-fix.toml"
+
+# Stock guest image, direct I/O for block volumes (block_device_cache_direct = true).
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-clh-runtime-rs-direct]
+runtime_type = "io.containerd.kata-clh-runtime-rs-direct.v2"
+runtime_path = "/opt/kata/runtime-rs/bin/containerd-shim-kata-v2"
+privileged_without_host_devices = true
+pod_annotations = ["io.katacontainers.config.hypervisor.default_memory", "io.katacontainers.config.hypervisor.default_vcpus", "io.katacontainers.config.hypervisor.enable_iommu", "io.katacontainers.config.hypervisor.kernel_params", "io.katacontainers.config.hypervisor.kernel_verity_params"]
+container_annotations = ["io.kubernetes.container.terminationMessage*"]
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-clh-runtime-rs-direct.options]
+ConfigPath = "/opt/kata-fix/configuration-clh-runtime-rs-direct.toml"
+
+# Patched guest image and direct I/O for block volumes.
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-clh-runtime-rs-fix-direct]
+runtime_type = "io.containerd.kata-clh-runtime-rs-fix-direct.v2"
+runtime_path = "/opt/kata/runtime-rs/bin/containerd-shim-kata-v2"
+privileged_without_host_devices = true
+pod_annotations = ["io.katacontainers.config.hypervisor.default_memory", "io.katacontainers.config.hypervisor.default_vcpus", "io.katacontainers.config.hypervisor.enable_iommu", "io.katacontainers.config.hypervisor.kernel_params", "io.katacontainers.config.hypervisor.kernel_verity_params"]
+container_annotations = ["io.kubernetes.container.terminationMessage*"]
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-clh-runtime-rs-fix-direct.options]
+ConfigPath = "/opt/kata-fix/configuration-clh-runtime-rs-fix-direct.toml"

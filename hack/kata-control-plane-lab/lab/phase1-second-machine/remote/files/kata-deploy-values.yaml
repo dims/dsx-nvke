@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Values for the kata-deploy chart 4.4.0 in the kind node.
+# The node is a plain containerd node for the chart, so k8sDistribution stays at k8s.
+k8sDistribution: k8s
+
+# Cloud Hypervisor first, QEMU as the fallback. The other shims are off.
+shims:
+  disableAll: true
+  clh-runtime-rs:
+    enabled: true
+  clh:
+    enabled: true
+  qemu-runtime-rs:
+    enabled: true
+  qemu:
+    enabled: true

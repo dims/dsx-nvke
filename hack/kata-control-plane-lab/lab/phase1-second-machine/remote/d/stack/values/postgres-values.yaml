@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Values for the PostgreSQL chart of the NVKE source: controller/deploy/charts/postgresql.
+# Base: cli/internal/bootstrap/controllerdeploy/manifests/postgres-values.yaml at bcc4376f.
+# The password comes from secrets/postgres-secret-values.yaml (auth.password).
+#
+# The chart defaults stay: namespace postgres, Service postgres-postgresql, image
+# docker.io/library/postgres:18.6 by digest, databases temporal and temporal_visibility.
+
+# The database of the controller. The key stays init-cwe.sql so that it replaces the
+# default of the chart (CREATE DATABASE "cloud-workflow").
+initdb:
+  scripts:
+    init-cwe.sql: |
+      CREATE DATABASE "nvke-controller";
+
+# Lab change: keep the data on a volume of the default StorageClass (local-path). The source
+# default is an emptyDir, which loses the NVKE and Temporal state at each pod restart.
+# controller/deploy/helm-values/postgres.yaml (Tilt) also uses a volume.
+# The init scripts run only on an empty volume. Delete the claim to start from zero.
+persistence:
+  enabled: true
+  size: 2Gi
+  storageClass: ""
+
+# Lab change: the image comes from the Docker Hub mirror. The tag 18.6 and the digest of the
+# chart (controller/deploy/charts/postgresql/values.yaml:23-24) stay.
+image:
+  repository: mirror.gcr.io/library/postgres

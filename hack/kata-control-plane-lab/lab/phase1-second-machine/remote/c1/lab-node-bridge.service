@@ -1,0 +1,16 @@
+# Lab: the bridge br-node for the node network (block C). See /usr/local/sbin/lab-node-bridge.sh.
+# Install: docker cp the script and this unit into the node, systemctl daemon-reload, systemctl enable --now lab-node-bridge.service
+# Remove: systemctl disable lab-node-bridge.service; rm the two files; ip link del br-node
+[Unit]
+Description=Lab: bridge br-node for the node network
+DefaultDependencies=no
+After=local-fs.target
+Before=kubelet.service containerd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/lab-node-bridge.sh
+
+[Install]
+WantedBy=multi-user.target

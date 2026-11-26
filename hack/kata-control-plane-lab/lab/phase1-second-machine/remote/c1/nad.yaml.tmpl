@@ -1,0 +1,29 @@
+# The node network for a pod: one more interface (net1) as a port of the bridge br-node of its
+# host node. The address is static and comes from the pod annotation
+#   k8s.v1.cni.cncf.io/networks: '[{"name": "nodenet", "ips": ["172.28.1.11/16"]}]'
+# so it is the same on each host node and after each replace. The annotation can also name a
+# hardware address ("mac": "02:..."), which then stays through a replace too. No gateway and no masquerade: the
+# default route of the pod stays on eth0.
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: nodenet
+  namespace: ${NS}
+spec:
+  config: |
+    {
+      "cniVersion": "1.0.0",
+      "name": "nodenet",
+      "plugins": [
+        {
+          "type": "bridge",
+          "bridge": "br-node",
+          "isGateway": false,
+          "isDefaultGateway": false,
+          "ipMasq": false,
+          "hairpinMode": false,
+          "capabilities": {"ips": true, "mac": true},
+          "ipam": {"type": "static"}
+        }
+      ]
+    }
