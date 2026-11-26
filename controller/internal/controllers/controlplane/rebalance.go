@@ -139,7 +139,7 @@ func (r *reconciler) reconcileControlPlaneRebalance(
 		return false, nil
 	}
 	if r.controlPlaneReplacementBlocked(cluster) {
-		logger.Warn("Skipping control-plane rebalance surge because controlPlaneVIP is not configured")
+		logger.Warn("Skipping control-plane rebalance surge because neither controlPlaneVIP nor controlPlaneEndpoint is configured")
 		return false, nil
 	}
 

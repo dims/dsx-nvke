@@ -45,7 +45,7 @@ The operator runs these steps.
    kubectl --kubeconfig <WORKLOAD_CLUSTER>.kubeconfig config view --minify -o jsonpath='{.clusters[0].cluster.server}'
    ```
 
-   The output is `https://<API_ADDRESS>:6443`, where `<API_ADDRESS>` is the cluster's `controlPlaneVIP`, or the first control-plane node's IP address if the cluster has no virtual IP address (VIP).
+   The output is `https://<API_ADDRESS>:6443`, where `<API_ADDRESS>` is the cluster's `controlPlaneVIP`, or the first control-plane node's IP address if the cluster has no virtual IP address (VIP). For a cluster created with `controlPlaneEndpoint`, the output names that endpoint.
 
 3. Confirm that the kubeconfig works.
 
@@ -112,7 +112,7 @@ The operator manages the rest through the NVKE API, and the customer asks the op
 
 The kubeconfig that NVKE publishes connects directly to its API address. Neither the management plane nor `nvkectl` proxies Kubernetes API traffic.
 
-When the cluster has a `controlPlaneVIP`, every control-plane node runs `kube-vip`, which advertises the VIP over Border Gateway Protocol (BGP) and withdraws it when that node's API server fails its readiness check. Traffic to the VIP on port 6443 reaches a healthy control-plane node. Without a VIP, the API address is the first control-plane node's IP address, and the API is unavailable whenever that node is.
+When the cluster has a `controlPlaneVIP`, every control-plane node runs `kube-vip`, which advertises the VIP over Border Gateway Protocol (BGP) and withdraws it when that node's API server fails its readiness check. Traffic to the VIP on port 6443 reaches a healthy control-plane node. A cluster created with `controlPlaneEndpoint` runs no `kube-vip`: the API address is that endpoint, and whatever you operate behind it decides which control-plane node receives the traffic. Without a VIP or a `controlPlaneEndpoint`, the API address is the first control-plane node's IP address, and the API is unavailable whenever that node is.
 
 NVKE does not create a public endpoint or an external load balancer for the API. Your network decides who can reach the API address. The management cluster must also reach it on port 6443 to operate the cluster.
 

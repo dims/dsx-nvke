@@ -8,8 +8,49 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/dsx-ai-factory/nvke/controller/internal/config"
 	"github.com/dsx-ai-factory/nvke/controller/internal/db"
 )
+
+// controlPlaneReplacementBlocked is the one gate in front of recycling,
+// remediation, rebalance and the replacement of nodes stuck pending.
+func TestControlPlaneReplacementBlocked(t *testing.T) {
+	tests := []struct {
+		name            string
+		cluster         db.Cluster
+		allowWithoutVIP bool
+		want            bool
+	}{
+		{
+			name:    "no VIP and no endpoint blocks replacement",
+			cluster: db.Cluster{},
+			want:    true,
+		},
+		{
+			name:    "a VIP allows replacement",
+			cluster: db.Cluster{ControlPlaneVIP: "10.0.0.100"},
+			want:    false,
+		},
+		{
+			name:    "a controlPlaneEndpoint allows replacement",
+			cluster: db.Cluster{ControlPlaneEndpoint: "lb.example.com:6443"},
+			want:    false,
+		},
+		{
+			name:            "the development override allows replacement",
+			cluster:         db.Cluster{},
+			allowWithoutVIP: true,
+			want:            false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := &reconciler{cfg: config.Config{AllowControlPlaneWithoutVIP: tt.allowWithoutVIP}}
+			assert.Equal(t, tt.want, r.controlPlaneReplacementBlocked(tt.cluster))
+		})
+	}
+}
 
 func TestControlPlane_HasDeleteInFlight(t *testing.T) {
 	tests := []struct {

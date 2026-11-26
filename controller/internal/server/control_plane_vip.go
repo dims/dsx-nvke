@@ -8,13 +8,14 @@ import (
 )
 
 const (
-	controlPlaneVIPRequiredMessage = "controlPlaneVIP is required to increase desired control-plane capacity above one; recreate the cluster with controlPlaneVIP configured"
-	controlPlaneVIPUpgradeMessage  = "controlPlaneVIP is required to upgrade the control plane; recreate the cluster with controlPlaneVIP configured"
-	controlPlaneVIPRolloutMessage  = "controlPlaneVIP is required to replace control-plane nodes; recreate the cluster with controlPlaneVIP configured before changing rollout-triggering control-plane configuration"
+	controlPlaneVIPRequiredMessage = "controlPlaneVIP or controlPlaneEndpoint is required to increase desired control-plane capacity above one; recreate the cluster with one of them configured"
+	controlPlaneVIPUpgradeMessage  = "controlPlaneVIP or controlPlaneEndpoint is required to upgrade the control plane; recreate the cluster with one of them configured"
+	controlPlaneVIPRolloutMessage  = "controlPlaneVIP or controlPlaneEndpoint is required to replace control-plane nodes; recreate the cluster with one of them configured before changing rollout-triggering control-plane configuration"
 )
 
-// validateControlPlaneCapacityChange lets existing no-VIP clusters keep or reduce capacity,
-// but rejects growth beyond one control-plane node unless the dev override is enabled.
+// validateControlPlaneCapacityChange lets existing clusters without a stable
+// endpoint (no VIP and no controlPlaneEndpoint) keep or reduce capacity, but
+// rejects growth beyond one control-plane node unless the dev override is enabled.
 func (s *clusterService) validateControlPlaneCapacityChange(cluster *db.Cluster, current, desired int) error {
 	if !s.allowControlPlaneWithoutVIP && !cluster.HasStableControlPlaneEndpoint() && desired > 1 && desired > current {
 		return newBadRequestErrorf("%s", controlPlaneVIPRequiredMessage)

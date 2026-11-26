@@ -27,7 +27,7 @@ var (
 	ErrLastJoinedControlPlaneNodePool = errors.New("cannot delete the last joined control-plane node pool; delete the cluster instead")
 	// ErrControlPlaneVIPRequired is returned when deleting a control-plane node
 	// would make the controller replace it without a stable API endpoint.
-	ErrControlPlaneVIPRequired = errors.New("controlPlaneVIP is required to replace a control-plane node; recreate the cluster with controlPlaneVIP configured")
+	ErrControlPlaneVIPRequired = errors.New("controlPlaneVIP or controlPlaneEndpoint is required to replace a control-plane node; recreate the cluster with one of them configured")
 	// ErrNodePoolDeleting is returned when node-pool teardown is already in
 	// progress; callers should treat the request as a no-op success.
 	ErrNodePoolDeleting = errors.New("node pool is deleting")

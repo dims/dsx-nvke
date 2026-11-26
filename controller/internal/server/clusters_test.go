@@ -593,6 +593,125 @@ func TestClusterService_CreateClusterRejectsControlPlaneVIPOverlap(t *testing.T)
 	mockDB.AssertNotCalled(t, "RunInTx", mock.Anything, mock.Anything)
 }
 
+// A request with controlPlaneEndpoint must fail before the transaction when
+// the value is wrong, and must not need a VIP for more than one control-plane
+// node when the value is right.
+func TestClusterService_CreateClusterControlPlaneEndpoint(t *testing.T) {
+	siteID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440001")
+	clusterID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
+
+	tests := []struct {
+		name                 string
+		controlPlaneEndpoint string
+		controlPlaneVIP      string
+		desiredCount         int
+		// wantMessage lists the parts of the 400 message. Empty means 201.
+		wantMessage []string
+	}{
+		{
+			name:                 "three control-plane nodes with an IPv4 endpoint",
+			controlPlaneEndpoint: "172.31.1.20:6443",
+			desiredCount:         3,
+		},
+		{
+			name:                 "three control-plane nodes with a DNS endpoint and no port",
+			controlPlaneEndpoint: "lb.example.com",
+			desiredCount:         3,
+		},
+		{
+			name:         "three control-plane nodes with no endpoint and no VIP",
+			desiredCount: 3,
+			wantMessage:  []string{"controlPlaneVIP or controlPlaneEndpoint is required"},
+		},
+		{
+			name:                 "an endpoint together with a VIP",
+			controlPlaneEndpoint: "172.31.1.20:6443",
+			controlPlaneVIP:      "172.31.1.10",
+			desiredCount:         3,
+			wantMessage:          []string{"controlPlaneEndpoint and controlPlaneVIP are mutually exclusive"},
+		},
+		{
+			name:                 "an IPv4 endpoint inside the pod CIDR",
+			controlPlaneEndpoint: "192.168.1.10:6443",
+			desiredCount:         1,
+			wantMessage:          []string{"controlPlaneEndpoint", "network.podCIDR"},
+		},
+		{
+			name:                 "an IPv4 endpoint inside the service CIDR",
+			controlPlaneEndpoint: "10.96.0.10",
+			desiredCount:         1,
+			wantMessage:          []string{"controlPlaneEndpoint", "network.serviceCIDR"},
+		},
+		{
+			name:                 "an IPv6 endpoint",
+			controlPlaneEndpoint: "[2001:db8::1]:6443",
+			desiredCount:         1,
+			wantMessage:          []string{"invalid controlPlaneEndpoint", "IPv4 address or a DNS name"},
+		},
+		{
+			name:                 "an endpoint with a port out of range",
+			controlPlaneEndpoint: "lb.example.com:70000",
+			desiredCount:         1,
+			wantMessage:          []string{"invalid controlPlaneEndpoint", "port"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockDB := &mockDB{MockTx: &mockTx{}}
+			if len(tt.wantMessage) == 0 {
+				mockDB.On("RunInTx", mock.Anything, mock.Anything).Return(nil)
+				mockDB.MockTx.On("CreateCluster", mock.Anything, mock.MatchedBy(func(c *db.Cluster) bool {
+					return c.ControlPlaneEndpoint == tt.controlPlaneEndpoint &&
+						c.ControlPlaneVIP == "" &&
+						c.ControlPlaneConfig.DesiredCount == tt.desiredCount
+				})).Return(forgeDBCluster(db.Cluster{
+					ID:                   clusterID,
+					Name:                 "test-cluster",
+					PodCIDR:              "192.168.0.0/16",
+					ServiceCIDR:          "10.96.0.0/12",
+					Nico:                 &db.NicoClusterProvider{OrgID: testOrgID, SiteID: siteID},
+					ControlPlaneEndpoint: tt.controlPlaneEndpoint,
+				}), nil)
+				mockDB.MockTx.On("CreateWorkflowOutboxEntry", mock.Anything, "ProvisionCluster", mock.Anything, mock.Anything).
+					Return(db.WorkflowOutbox{}, nil)
+				expectControlPlaneConfigCreate(mockDB.MockTx, clusterID)
+			}
+
+			service := newTestClusterService(discardLogger(), mockDB)
+			resp, err := service.CreateCluster(context.Background(), api.CreateClusterRequestObject{
+				Body: &api.CreateClusterRequest{
+					Name:                          "test-cluster",
+					Nico:                          nicoClusterProvider(siteID, uuid.New()),
+					CniPlugin:                     "ovn-kubernetes",
+					ControlPlaneKubernetesVersion: "1.29.0",
+					ControlPlaneVIP:               tt.controlPlaneVIP,
+					ControlPlaneConfig:            nicoCreateControlPlaneConfig(tt.desiredCount, false),
+					ControlPlaneEndpoint:          tt.controlPlaneEndpoint,
+				},
+			})
+			require.NoError(t, err)
+
+			if len(tt.wantMessage) > 0 {
+				badRequest, ok := resp.(api.CreateCluster400JSONResponse)
+				require.True(t, ok, "expected CreateCluster400JSONResponse, got %T", resp)
+				for _, part := range tt.wantMessage {
+					assert.Contains(t, badRequest.Message, part)
+				}
+				mockDB.AssertNotCalled(t, "RunInTx", mock.Anything, mock.Anything)
+				return
+			}
+
+			created, ok := resp.(api.CreateCluster201JSONResponse)
+			require.True(t, ok, "expected CreateCluster201JSONResponse, got %T", resp)
+			require.NotNil(t, created.ControlPlaneEndpoint)
+			assert.Equal(t, tt.controlPlaneEndpoint, *created.ControlPlaneEndpoint)
+			assert.Nil(t, created.ControlPlaneVIP)
+			mockDB.MockTx.AssertExpectations(t)
+		})
+	}
+}
+
 func TestClusterService_CreateClusterRejectsCustomNetworkForCalico(t *testing.T) {
 	mockDB := &mockDB{MockTx: &mockTx{}}
 	service := newTestClusterService(discardLogger(), mockDB)
@@ -2390,6 +2509,38 @@ func TestDbClusterFromAPI_EnableCPNodeRecycling(t *testing.T) {
 			cluster, err := server.DBClusterFromAPI(req)
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, cluster.EnableCPNodeRecycling)
+		})
+	}
+}
+
+func TestClusterControlPlaneEndpointMapping(t *testing.T) {
+	strPtr := func(s string) *string { return &s }
+	cases := []struct {
+		name     string
+		endpoint string
+		want     *string
+	}{
+		{name: "unset is stored empty and left out of the response", endpoint: "", want: nil},
+		{name: "host and port are stored and returned as given", endpoint: "172.31.1.20:6443", want: strPtr("172.31.1.20:6443")},
+		{name: "a host without a port is stored and returned as given", endpoint: "lb.example.com", want: strPtr("lb.example.com")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &api.CreateClusterRequest{
+				Name:                          "endpoint",
+				ControlPlaneKubernetesVersion: "1.31.0",
+				CniPlugin:                     "ovn-kubernetes",
+				ControlPlaneEndpoint:          tc.endpoint,
+			}
+
+			cluster, err := server.DBClusterFromAPI(req)
+			require.NoError(t, err)
+			assert.Equal(t, tc.endpoint, cluster.ControlPlaneEndpoint)
+			assert.Empty(t, cluster.ControlPlaneVIP)
+
+			got := server.APIClusterFromDB(&cluster)
+			assert.Equal(t, tc.want, got.ControlPlaneEndpoint)
+			assert.Nil(t, got.ControlPlaneVIP)
 		})
 	}
 }

@@ -189,7 +189,7 @@ func (a *Controller) reconcileNodePool(ctx context.Context, tx db.Tx, nodePool d
 	// Cap surge to the number of deprecated nodes (no point surging more than what we're migrating)
 	surgeNodes := min(nodePool.MaxSurge, nodesInNonCurrentNodeSets)
 	if !a.cfg.AllowControlPlaneWithoutVIP && nodePool.ControlPlane && surgeNodes > 0 && !cluster.HasStableControlPlaneEndpoint() {
-		logger.Warn("Skipping control-plane surge because controlPlaneVIP is not configured")
+		logger.Warn("Skipping control-plane surge because neither controlPlaneVIP nor controlPlaneEndpoint is configured")
 		surgeNodes = 0
 	}
 
@@ -266,7 +266,7 @@ func (a *Controller) applyNewNodeSet(
 	logger *slog.Logger,
 ) (db.NodePool, db.NodeSet, error) {
 	if !a.cfg.AllowControlPlaneWithoutVIP && nodePool.ControlPlane && nodePool.CurrentNodeSetID != nil && !cluster.HasStableControlPlaneEndpoint() {
-		logger.Warn("Skipping control-plane NodeSet replacement because controlPlaneVIP is not configured")
+		logger.Warn("Skipping control-plane NodeSet replacement because neither controlPlaneVIP nor controlPlaneEndpoint is configured")
 		return nodePool, prevNodeSet, nil
 	}
 

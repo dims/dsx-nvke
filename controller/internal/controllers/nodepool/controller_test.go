@@ -641,14 +641,16 @@ func TestUnit_NodePoolControllerControlPlaneSurgeRequiresVIP(t *testing.T) {
 	ctx := context.Background()
 
 	for _, tc := range []struct {
-		name            string
-		controlPlaneVIP string
-		wantDesired     int
-		allowWithoutVIP bool
+		name                 string
+		controlPlaneVIP      string
+		wantDesired          int
+		allowWithoutVIP      bool
+		controlPlaneEndpoint string
 	}{
 		{name: "without VIP", wantDesired: 0},
 		{name: "dev override without VIP", allowWithoutVIP: true, wantDesired: 1},
 		{name: "with VIP", controlPlaneVIP: "172.31.0.10", wantDesired: 1},
+		{name: "with controlPlaneEndpoint", wantDesired: 1, controlPlaneEndpoint: "lb.example.com:6443"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			clusterID := uuid.New()
@@ -694,8 +696,9 @@ func TestUnit_NodePoolControllerControlPlaneSurgeRequiresVIP(t *testing.T) {
 				return nodeSet.ID == oldNodeSetID && nodeSet.DesiredCount == 0
 			})).Return(oldNodeSet, nil)
 			mockTx.On("GetCluster", mock.Anything, clusterID).Return(db.Cluster{
-				ID:              clusterID,
-				ControlPlaneVIP: tc.controlPlaneVIP,
+				ID:                   clusterID,
+				ControlPlaneVIP:      tc.controlPlaneVIP,
+				ControlPlaneEndpoint: tc.controlPlaneEndpoint,
 			}, nil)
 			updatedCurrentNodeSet := currentNodeSet
 			updatedCurrentNodeSet.DesiredCount = 1
@@ -724,11 +727,14 @@ func TestUnit_NodePoolControllerReplacementRequiresVIP(t *testing.T) {
 			wantCreate      bool
 			clusterError    error
 			allowWithoutVIP bool
+			endpoint        string
 		}{
 			{name: "control plane without VIP", controlPlane: true},
 			{name: "dev override without VIP", controlPlane: true, allowWithoutVIP: true, wantCreate: true},
 			{name: "control plane with whitespace VIP", controlPlane: true, vip: " \t\n"},
 			{name: "control plane with VIP", controlPlane: true, vip: "172.31.0.10", wantCreate: true},
+			{name: "control plane with controlPlaneEndpoint", controlPlane: true, wantCreate: true, endpoint: "lb.example.com:6443"},
+			{name: "control plane with whitespace controlPlaneEndpoint", controlPlane: true, endpoint: " \t\n"},
 			{name: "first control plane without VIP", controlPlane: true, bootstrap: true, wantCreate: true},
 			{name: "unchanged control plane without VIP", controlPlane: true, unchanged: true},
 			{name: "worker without VIP", wantCreate: true},
@@ -769,7 +775,7 @@ func TestUnit_NodePoolControllerReplacementRequiresVIP(t *testing.T) {
 					clusterProviderType = db.ProviderTypeCAPI
 				}
 				mockTx.On("GetCluster", mock.Anything, pool.ClusterID).Return(db.Cluster{
-					ID: pool.ClusterID, ProviderType: clusterProviderType, ControlPlaneVIP: tc.vip,
+					ID: pool.ClusterID, ProviderType: clusterProviderType, ControlPlaneVIP: tc.vip, ControlPlaneEndpoint: tc.endpoint,
 				}, tc.clusterError).Once()
 				if !tc.bootstrap && tc.clusterError == nil {
 					mockTx.On("GetNodeSet", mock.Anything, current.ID).Return(current, nil)

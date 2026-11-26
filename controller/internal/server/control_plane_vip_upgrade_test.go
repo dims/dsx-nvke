@@ -5,7 +5,6 @@ package server_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -20,8 +19,19 @@ import (
 )
 
 func TestClusterService_UpdateCluster_UpgradeWithoutVIP(t *testing.T) {
-	for _, allow := range []bool{false, true} {
-		t.Run(fmt.Sprintf("override=%t", allow), func(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		allowWithoutVIP      bool
+		controlPlaneVIP      string
+		controlPlaneEndpoint string
+		wantBadRequest       bool
+	}{
+		{name: "override=false", wantBadRequest: true},
+		{name: "override=true", allowWithoutVIP: true},
+		{name: "with controlPlaneVIP", controlPlaneVIP: "172.31.0.10"},
+		{name: "with controlPlaneEndpoint", controlPlaneEndpoint: "lb.example.com:6443"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			clusterID := uuid.New()
 			oldConfigID := uuid.New()
 			newConfigID := uuid.New()
@@ -36,6 +46,7 @@ func TestClusterService_UpdateCluster_UpgradeWithoutVIP(t *testing.T) {
 				ID:                clusterID,
 				Name:              "no-vip",
 				KubernetesVersion: currentVersion,
+				ControlPlaneVIP:   tc.controlPlaneVIP,
 				ProviderType:      db.ProviderTypeCAPI,
 				Capi:              &db.CAPIClusterProvider{},
 				ControlPlaneConfig: db.ControlPlaneConfig{
@@ -44,6 +55,7 @@ func TestClusterService_UpdateCluster_UpgradeWithoutVIP(t *testing.T) {
 					MaxSurge:               1,
 					ControlPlaneConfigSpec: currentSpec,
 				},
+				ControlPlaneEndpoint: tc.controlPlaneEndpoint,
 			}
 
 			mockDB := &mockDB{MockTx: &mockTx{}}
@@ -88,7 +100,7 @@ func TestClusterService_UpdateCluster_UpgradeWithoutVIP(t *testing.T) {
 				},
 			}, nil).Maybe()
 
-			svc := server.NewServerImpl(config.Config{AllowControlPlaneWithoutVIP: allow}, discardLogger(), mockDB, nil, nil)
+			svc := server.NewServerImpl(config.Config{AllowControlPlaneWithoutVIP: tc.allowWithoutVIP}, discardLogger(), mockDB, nil, nil)
 			resp, err := svc.UpdateCluster(context.Background(), api.UpdateClusterRequestObject{
 				ClusterID: clusterID,
 				Body: &api.UpdateClusterRequest{
@@ -98,7 +110,7 @@ func TestClusterService_UpdateCluster_UpgradeWithoutVIP(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			if allow {
+			if !tc.wantBadRequest {
 				require.IsType(t, api.UpdateCluster200JSONResponse{}, resp)
 				mockDB.MockTx.AssertCalled(t, "UpdateCluster", mock.Anything, mock.Anything)
 			} else {

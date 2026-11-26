@@ -114,6 +114,13 @@ type Cluster struct {
 	// SpireServer is the SPIRE server last requested for the cluster's nodes.
 	// Nil means none was requested.
 	SpireServer *ClusterSpireServer `bun:"spire_server,type:jsonb"`
+
+	// ControlPlaneEndpoint is an API server endpoint that NVKE does not manage,
+	// as host or host:port, for example a load balancer in front of the API
+	// servers. NVKE gives it to kubeadm as the controlPlaneEndpoint and
+	// configures no kube-vip for the cluster. It is set only at creation and
+	// never together with ControlPlaneVIP. Empty means none was given.
+	ControlPlaneEndpoint string `bun:"control_plane_endpoint,type:text,nullzero"`
 }
 
 // ClusterSpireServer is a SPIRE server address requested for a cluster's
@@ -185,13 +192,14 @@ func (c *Cluster) NicoSiteID() uuid.UUID {
 // HasStableControlPlaneEndpoint reports whether the cluster's API server
 // endpoint outlives each control-plane node, so that a node can be added,
 // replaced or removed without moving the endpoint. A kube-vip VIP is such an
-// endpoint. Without one the endpoint is the first control-plane node's IP,
-// which goes away with that node.
+// endpoint, and so is a ControlPlaneEndpoint that NVKE does not manage.
+// Without one the endpoint is the first control-plane node's IP, which goes
+// away with that node.
 //
 // Every gate that scales, upgrades or replaces control-plane nodes asks this
 // one question, so a new kind of stable endpoint is added here and nowhere else.
 func (c *Cluster) HasStableControlPlaneEndpoint() bool {
-	return strings.TrimSpace(c.ControlPlaneVIP) != ""
+	return strings.TrimSpace(c.ControlPlaneVIP) != "" || strings.TrimSpace(c.ControlPlaneEndpoint) != ""
 }
 
 func (c *Cluster) SetNicoProvider(provider NicoClusterProvider) {

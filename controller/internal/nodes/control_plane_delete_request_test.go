@@ -478,15 +478,19 @@ func TestStartRequestedTeardownForcesDeleteWhenAgentBecomesUnavailable(t *testin
 func TestLiveDeleteVIPOverridePreservesSafety(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name      string
-		allow     bool
-		count     int
-		wantError string
+		name                 string
+		allow                bool
+		count                int
+		wantError            string
+		controlPlaneEndpoint string
 	}{
 		{name: "default rejects without VIP", count: 4, wantError: "controlPlaneVIP"},
 		{name: "override permits replacement intent", allow: true, count: 4},
 		{name: "override keeps quorum floor", allow: true, count: 3, wantError: "below the minimum of 3"},
 		{name: "override protects last joined node", allow: true, count: 1, wantError: "last joined control-plane node"},
+		{name: "controlPlaneEndpoint permits replacement intent", count: 4, controlPlaneEndpoint: "lb.example.com:6443"},
+		{name: "controlPlaneEndpoint keeps quorum floor", count: 3, wantError: "below the minimum of 3", controlPlaneEndpoint: "lb.example.com:6443"},
+		{name: "controlPlaneEndpoint protects last joined node", count: 1, wantError: "last joined control-plane node", controlPlaneEndpoint: "lb.example.com:6443"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -498,9 +502,11 @@ func TestLiveDeleteVIPOverridePreservesSafety(t *testing.T) {
 			target := cpNodes[0]
 			tx := &testutil.MockTx{}
 			tx.On("GetNode", mock.Anything, target.ID).Return(target, nil).Once()
-			tx.On("GetClusterForUpdate", mock.Anything, target.ClusterID).Return(db.Cluster{ID: target.ClusterID}, nil).Once()
+			cluster := db.Cluster{ID: target.ClusterID, ControlPlaneEndpoint: tc.controlPlaneEndpoint}
+			tx.On("GetClusterForUpdate", mock.Anything, target.ClusterID).Return(cluster, nil).Once()
 			tx.On("GetNodeForUpdate", mock.Anything, target.ID).Return(target, nil).Once()
-			if tc.allow {
+			// The census runs only after the endpoint gate lets the delete through.
+			if tc.allow || tc.controlPlaneEndpoint != "" {
 				expectControlPlaneCensus(tx, cpNodes)
 			}
 			if tc.wantError == "" {

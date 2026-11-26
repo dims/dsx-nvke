@@ -109,7 +109,7 @@ NVKE admits callers by group. Every admitted caller can call every endpoint unti
 | Node CPU architecture | Image build | The node image and the SPIRE TPM attestor checksum are per architecture. |
 | Workload cluster Container Network Interface (CNI) plugin and networks | Cluster creation | `ovn-kubernetes`. Pod and service ranges default to `192.168.0.0/16` and `10.96.0.0/12`. |
 | Workload cluster etcd encryption | Cluster creation | `etcdEncrypted` has no default. You can turn encryption on later, never off. |
-| Workload cluster API VIP | Cluster creation | Without one, the control plane has one node that you cannot scale, upgrade or replace. Adding a VIP means recreating the cluster. |
+| Workload cluster API VIP | Cluster creation | Without one, or a `controlPlaneEndpoint` that you operate yourself, the control plane has one node that you cannot scale, upgrade or replace. Adding a VIP means recreating the cluster. |
 | NICo identifiers | Cluster or node pool creation | A cluster's `orgID`, `siteID` and `vpcID`, and a node pool's `instanceTypeID`, InfiniBand partition and NVLink logical partition. |
 | Releases | When applied | `MachineImage`, `ClusterRelease` and `NodePoolRelease` resources are immutable. To change an image or its user data, publish a release with a new name. |
 

@@ -14,7 +14,7 @@ This page describes how to create an NVIDIA Kubernetes Engine (NVKE) workload cl
   The Deployment `controller-manager` shows all replicas ready, and the Secret `nico-credentials` is listed. `<CLUSTER_NAME>` is the management cluster's name.
 - You have the NVIDIA Infra Controller (NICo) identifiers listed in [Collect the NICo identifiers](../operate/provider-nico.md#collect-the-nico-identifiers): the organization, site and virtual private cloud (VPC) IDs, the instance type IDs, the VPC prefix or subnet IDs, and optionally SSH key group IDs.
 - The releases you plan to use exist on the management cluster. The control plane names a cluster release and each node pool names a node pool release. List them with `nvkectl get clusterreleases` and `nvkectl get nodepoolreleases`.
-- If the cluster has more than one control-plane node, you have an unused, routable IPv4 address on the control-plane network for the Kubernetes API virtual IP address (VIP).
+- If the cluster has more than one control-plane node, you have an unused, routable IPv4 address on the control-plane network for the Kubernetes API virtual IP address (VIP). In place of a VIP, you can use an endpoint that you operate yourself, such as a load balancer that forwards to port 6443 of the control-plane nodes, and set it as `controlPlaneEndpoint`.
 - `curl` and `jq` are installed, for the REST calls on this page.
 
 ## Write the cluster spec
@@ -76,7 +76,8 @@ The cluster spec is a YAML file that describes the cluster, its control plane an
    |---|---|---|
    | `cniPlugin` | `ovn-kubernetes` | `cniVersion` defaults to `2.4.2`, the version the node image carries. |
    | `etcdEncrypted` | None, required | Encrypts etcd at rest. You can turn encryption on later, but not off. |
-   | `controlPlaneVIP` | None | Without a VIP, the API endpoint is the first control-plane node's IP. By default, `desiredCount` must be `1`, and you cannot later scale the control plane above one node, upgrade it or replace its nodes. The [development override](#change-cluster-settings-after-creation) permits those operations without a VIP. Recreate the cluster to add a VIP. |
+   | `controlPlaneVIP` | None | Without a VIP or a `controlPlaneEndpoint`, the API endpoint is the first control-plane node's IP. By default, `desiredCount` must be `1`, and you cannot later scale the control plane above one node, upgrade it or replace its nodes. The [development override](#change-cluster-settings-after-creation) permits those operations without either. Recreate the cluster to add a VIP. |
+   | `controlPlaneEndpoint` | None | An API endpoint that NVKE does not manage, as `host` or `host:port`, in place of `controlPlaneVIP`. The host is a DNS name, or an IPv4 address outside the pod and service CIDRs. NVKE gives the value to kubeadm as the control-plane endpoint and runs no `kube-vip`. The cluster can scale, upgrade and replace control-plane nodes as with a VIP. A request with both fields is rejected. |
    | `network.podCIDR` | `192.168.0.0/16` | Private IPv4 CIDRs, comma-separated, each `/12` to `/23`. Needs one `/24` for every node in the request, plus one. |
    | `network.serviceCIDR` | `10.96.0.0/12` | Private IPv4, `/12` to `/24`. |
    | `nico.orgID`, `siteID`, `vpcID` | None, required | Fixed for the life of the cluster. |
@@ -87,7 +88,7 @@ The cluster spec is a YAML file that describes the cluster, its control plane an
 
    | Field | Default | Notes |
    |---|---|---|
-   | `controlPlaneConfig.desiredCount` | None, required | Number of control-plane nodes. Use an odd number so that etcd keeps a quorum. More than one requires `controlPlaneVIP` unless the controller enables the development override described below. Exactly two is excluded from automatic certificate renewal: create the cluster with one, or three or more. An existing two-node cluster cannot scale down to one and must be scaled to three or more. |
+   | `controlPlaneConfig.desiredCount` | None, required | Number of control-plane nodes. Use an odd number so that etcd keeps a quorum. More than one requires `controlPlaneVIP` or `controlPlaneEndpoint` unless the controller enables the development override described below. Exactly two is excluded from automatic certificate renewal: create the cluster with one, or three or more. An existing two-node cluster cannot scale down to one and must be scaled to three or more. |
    | `controlPlaneConfig.maxSurge` | `0` | Extra control-plane nodes allowed during a rollout: `0` or `1`. |
    | `controlPlaneConfig.systemReservedMemory` | `16Gi` | Memory the kubelet reserves for system daemons. |
    | `controlPlaneConfig.nodeLabels` | None | Labels applied to each control-plane node after it joins. Set at creation; updating them is not supported, see [Preview status and known limitations](../overview/preview-status.md#workload-clusters-and-node-pools). Control-plane nodes take no custom taints. |
@@ -209,16 +210,18 @@ You change three cluster settings after creation with `nvkectl patch cluster`, w
 
 `enableOidc` requires Kubernetes 1.30.0 or later and turns on the shared OIDC provider that the `nvkeOIDCAuth` chart values configure. The install in [Run NVKE end to end on one machine](../get-started/local-site.md) configures it for the management cluster's SPIRE server and sets `nvkeOIDCAuth.enabled` to `false`, so new clusters start without it and the `enableOidc` patch is accepted. Try `enableOidc` on one cluster before you rely on it. [Configure OIDC for workload clusters](oidc.md) describes the shared provider, and the fleet-wide providers that a cluster gets only at creation.
 
-The same `PATCH` also takes `controlPlaneKubernetesVersion`, to upgrade the control plane, as described in [Upgrade a workload cluster's Kubernetes version](upgrade.md), and `controlPlaneConfig`, to change the control-plane node count or release. An upgrade, a node count above one and a release change each require `controlPlaneVIP` by default.
+The same `PATCH` also takes `controlPlaneKubernetesVersion`, to upgrade the control plane, as described in [Upgrade a workload cluster's Kubernetes version](upgrade.md), and `controlPlaneConfig`, to change the control-plane node count or release. An upgrade, a node count above one and a release change each require `controlPlaneVIP` or `controlPlaneEndpoint` by default.
 
 A dedicated development NVKE controller can set
 `allowControlPlaneWithoutVIP: true` in its controller configuration file.
 For a Helm installation, set the chart value of the same name. This setting
 permits creation, scale-up, upgrades, rollout, remediation and node replacement
-without a VIP for every cluster the controller manages. The default is false.
+without a VIP or a `controlPlaneEndpoint` for every cluster the controller
+manages. The default is false.
 API requests and responses keep their existing format.
 
-Without a VIP, kubeadm uses the initializing node's IP as the API endpoint.
+Without a VIP or a `controlPlaneEndpoint`, kubeadm uses the initializing
+node's IP as the API endpoint.
 Replacing that node can break API access and later node joins. This override
 does not provide endpoint failover. Quorum, health and deletion protections
 still apply. A supplied VIP still receives normal address validation.

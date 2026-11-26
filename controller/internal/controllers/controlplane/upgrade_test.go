@@ -6,7 +6,6 @@ package controlplane
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"testing"
 
@@ -95,9 +94,20 @@ func TestIsControlPlaneHealthy_WithSurgeThreshold(t *testing.T) {
 
 func TestReconcileNodesNeedingRolloutWithoutControlPlaneVIP(t *testing.T) {
 	t.Parallel()
-	for _, allow := range []bool{false, true} {
-		t.Run(fmt.Sprintf("override=%t", allow), func(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		allow                bool
+		controlPlaneEndpoint string
+	}{
+		{name: "override=false"},
+		{name: "override=true", allow: true},
+		{name: "with controlPlaneEndpoint", controlPlaneEndpoint: "lb.example.com:6443"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			// The surge starts only when the cluster has a stable endpoint or the
+			// development override is on.
+			surges := tc.allow || tc.controlPlaneEndpoint != ""
 			clusterID := uuid.New()
 			oldConfigID := uuid.New()
 			desiredSpec := db.ControlPlaneConfigSpec{KubernetesVersion: "1.31.0"}
@@ -114,6 +124,7 @@ func TestReconcileNodesNeedingRolloutWithoutControlPlaneVIP(t *testing.T) {
 					DesiredCount:           1,
 					MaxSurge:               1,
 				},
+				ControlPlaneEndpoint: tc.controlPlaneEndpoint,
 			}
 			node := db.Node{
 				ID:                          uuid.New(),
@@ -131,14 +142,14 @@ func TestReconcileNodesNeedingRolloutWithoutControlPlaneVIP(t *testing.T) {
 			}
 			mockTx := &testutil.MockTx{}
 			surgeError := errors.New("surge database failure")
-			if allow {
+			if surges {
 				mockTx.On("ListClusterNodeNames", mock.Anything, clusterID).Return([]string{}, surgeError).Once()
 			}
-			r := &reconciler{cfg: config.Config{AllowControlPlaneWithoutVIP: allow}, db: mockTx, logger: slog.Default()}
+			r := &reconciler{cfg: config.Config{AllowControlPlaneWithoutVIP: tc.allow}, db: mockTx, logger: slog.Default()}
 
 			_, err := r.reconcileNodesNeedingRollout(context.Background(), cluster, cp, domainAllocator{}, nil)
 
-			if allow {
+			if surges {
 				require.ErrorIs(t, err, surgeError)
 			} else {
 				require.NoError(t, err)

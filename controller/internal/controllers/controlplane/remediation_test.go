@@ -5,7 +5,6 @@ package controlplane
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -652,10 +651,21 @@ func TestRemediateMachinesRecordsIntentUnderTheController(t *testing.T) {
 
 func TestRemediateMachinesWithoutControlPlaneVIP(t *testing.T) {
 	t.Parallel()
-	for _, allow := range []bool{false, true} {
-		t.Run(fmt.Sprintf("override=%t", allow), func(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		allow                bool
+		controlPlaneEndpoint string
+	}{
+		{name: "override=false"},
+		{name: "override=true", allow: true},
+		{name: "with controlPlaneEndpoint", controlPlaneEndpoint: "lb.example.com:6443"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			cluster := db.Cluster{ID: uuid.New(), Name: "legacy-no-vip"}
+			// Remediation starts only when the cluster has a stable endpoint or
+			// the development override is on.
+			remediates := tc.allow || tc.controlPlaneEndpoint != ""
+			cluster := db.Cluster{ID: uuid.New(), Name: "legacy-no-vip", ControlPlaneEndpoint: tc.controlPlaneEndpoint}
 			healthy := func(name string) db.Node {
 				return db.Node{
 					ID: uuid.New(), ClusterID: cluster.ID, ControlPlane: true, Name: name,
@@ -674,7 +684,7 @@ func TestRemediateMachinesWithoutControlPlaneVIP(t *testing.T) {
 				clusterControlPlaneConfig: db.ControlPlaneConfig{DesiredCount: 3},
 			}
 			mockTx := &testutil.MockTx{}
-			if allow {
+			if remediates {
 				// Remediation reads the node and locks its cluster before deleting so the
 				// control-plane mutation fence is checked under the cluster lock.
 				mockTx.On("GetNode", mock.Anything, marked.ID).Return(marked, nil).Once()
@@ -684,13 +694,13 @@ func TestRemediateMachinesWithoutControlPlaneVIP(t *testing.T) {
 					return node.ID == marked.ID && nodes.IsDeleteRequested(*node)
 				})).Return(marked, nil).Once()
 			}
-			r := &reconciler{cfg: config.Config{AllowControlPlaneWithoutVIP: allow}, db: mockTx, logger: slog.Default()}
+			r := &reconciler{cfg: config.Config{AllowControlPlaneWithoutVIP: tc.allow}, db: mockTx, logger: slog.Default()}
 
 			requeue, err := r.remediateMachines(context.Background(), cluster, cp)
 
 			require.NoError(t, err)
-			assert.Equal(t, allow, requeue)
-			if !allow {
+			assert.Equal(t, remediates, requeue)
+			if !remediates {
 				mockTx.AssertNotCalled(t, "UpdateNode", mock.Anything, mock.Anything)
 			}
 			mockTx.AssertExpectations(t)

@@ -241,6 +241,11 @@ type Cluster struct {
 	// ControlPlaneConfig Current control-plane configuration.
 	ControlPlaneConfig *ControlPlaneConfig `json:"controlPlaneConfig,omitempty"`
 
+	// ControlPlaneEndpoint API server endpoint that NVKE does not manage, as `host` or `host:port`,
+	// if the cluster was created with one. Never set together with
+	// `controlPlaneVIP`.
+	ControlPlaneEndpoint *string `json:"controlPlaneEndpoint,omitempty"`
+
 	// Infra Infra provider fields.
 	Infra *InfraClusterProvider `json:"infra,omitempty"`
 
@@ -367,7 +372,7 @@ type ControlPlaneConfig struct {
 	// ControllerManager Arguments for one control-plane component.
 	ControllerManager *ControlPlaneComponentConfig `json:"controllerManager,omitempty"`
 
-	// DesiredCount The desired number of cluster-level control plane nodes. Creating a cluster with or increasing this count above 1 requires controlPlaneVIP on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
+	// DesiredCount The desired number of cluster-level control plane nodes. Creating a cluster with or increasing this count above 1 requires controlPlaneVIP or controlPlaneEndpoint on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
 	DesiredCount int `json:"desiredCount,omitempty"`
 
 	// Infra Infra provider control plane fields.
@@ -545,7 +550,7 @@ type CreateClusterControlPlaneConfig struct {
 	// ControllerManager Arguments for one control-plane component.
 	ControllerManager *ControlPlaneComponentConfig `json:"controllerManager,omitempty"`
 
-	// DesiredCount The desired number of cluster-level control plane nodes. Must be at least 1. Values above 1 require controlPlaneVIP on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
+	// DesiredCount The desired number of cluster-level control plane nodes. Must be at least 1. Values above 1 require controlPlaneVIP or controlPlaneEndpoint on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
 	DesiredCount int `json:"desiredCount"`
 
 	// Infra Infra provider fields for cluster-level control plane configuration. Mutually exclusive with `nico`.
@@ -610,11 +615,14 @@ type CreateClusterRequest struct {
 	EtcdEncrypted bool `json:"etcdEncrypted"`
 
 	// ControlPlaneVIP Virtual IP for the API server through kube-vip. Omit to skip kube-vip and
-	// use the first control-plane node's IP as the API server endpoint. Must not
-	// fall inside the pod or service CIDR. An explicit empty string is rejected.
-	// By default, a cluster without a VIP must have exactly one desired
-	// control-plane node. Scale-up above one node, upgrades and node replacement
-	// require a VIP unless the controller deployment enables the development-only
+	// use the first control-plane node's IP as the API server endpoint, or the
+	// address in `controlPlaneEndpoint` when that is set. Must not fall inside
+	// the pod or service CIDR. An explicit empty string is rejected. Mutually
+	// exclusive with `controlPlaneEndpoint`.
+	// By default, a cluster without a VIP and without `controlPlaneEndpoint`
+	// must have exactly one desired control-plane node. Scale-up above one
+	// node, upgrades and node replacement require one of the two unless the
+	// controller deployment enables the development-only
 	// allowControlPlaneWithoutVIP setting. That override keeps the initializing
 	// node's IP as the endpoint; replacing that node can break API access.
 	// Quorum, health and deletion protections still apply.
@@ -631,6 +639,21 @@ type CreateClusterRequest struct {
 	// `nico` carries the NICo settings for the control-plane nodes; it is required
 	// for a NICo cluster. `launchLayer` is required for a LaunchLayer cluster.
 	ControlPlaneConfig *CreateClusterControlPlaneConfig `json:"controlPlaneConfig,omitempty"`
+
+	// ControlPlaneEndpoint API server endpoint that NVKE does not manage, as `host` or `host:port`,
+	// the same form as the kubeadm `controlPlaneEndpoint` field. The host is an
+	// IPv4 address or a DNS name. Without a port, kubeadm uses the API server
+	// port, 6443. Use it for an address that reaches the API servers of the
+	// control-plane nodes without NVKE, for example a load balancer. NVKE
+	// gives the value to kubeadm as the control-plane endpoint and does not
+	// configure kube-vip. NVKE does not create or check the address.
+	// The cluster counts as one with a stable endpoint, the same as with
+	// `controlPlaneVIP`: it can have more than one control-plane node, and
+	// scale-up, upgrades and node replacement are allowed.
+	// Mutually exclusive with `controlPlaneVIP`. An IPv4 host must not fall
+	// inside the pod or service CIDR. Fixed at creation. An explicit empty
+	// string is rejected.
+	ControlPlaneEndpoint string `json:"controlPlaneEndpoint,omitempty"`
 
 	// EnableCPNodeRecycling When true, control-plane upgrades and configuration changes replace nodes
 	// automatically. When false, the default, nodes needing replacement are reported as
@@ -679,7 +702,7 @@ type CreateNodePoolRequest struct {
 	// NodeTaints Taints applied to the pool's nodes at creation. Not allowed on control-plane pools. Keys under nvke.nvidia.com, nke.nvidia.com (legacy), nke.io (legacy), kubernetes.io, k8s.io and their subdomains are reserved. Each key and effect pair may appear only once.
 	NodeTaints []NodeTaint `json:"nodeTaints,omitempty"`
 
-	// DesiredNodeCount The desired number of nodes in the pool. For control-plane pools, aggregate capacity above 1 requires controlPlaneVIP on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
+	// DesiredNodeCount The desired number of nodes in the pool. For control-plane pools, aggregate capacity above 1 requires controlPlaneVIP or controlPlaneEndpoint on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
 	DesiredNodeCount int `json:"desiredNodeCount"`
 
 	// Description Free-text description.
@@ -1514,7 +1537,7 @@ type NodePoolCreateConfig struct {
 	// NodeTaints Taints applied to the pool's nodes at creation. Not allowed on control-plane pools. Keys under nvke.nvidia.com, nke.nvidia.com (legacy), nke.io (legacy), kubernetes.io, k8s.io and their subdomains are reserved. Each key and effect pair may appear only once.
 	NodeTaints []NodeTaint `json:"nodeTaints,omitempty"`
 
-	// DesiredNodeCount The desired number of nodes in the pool. For control-plane pools, aggregate capacity above 1 requires controlPlaneVIP on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
+	// DesiredNodeCount The desired number of nodes in the pool. For control-plane pools, aggregate capacity above 1 requires controlPlaneVIP or controlPlaneEndpoint on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
 	DesiredNodeCount int `json:"desiredNodeCount"`
 
 	// Description Free-text description.
@@ -1653,15 +1676,16 @@ type SpireServer struct {
 // UpdateClusterControlPlaneConfig Changes to `release` or the Kubernetes version start a control-plane
 // rollout. All fields are optional. A provider payload that does not match the
 // cluster's provider is rejected with 400.
-// Rollout-triggering changes require controlPlaneVIP unless the development-only
-// allowControlPlaneWithoutVIP setting is enabled. maxSurge alone does not
-// trigger a rollout and remains mutable without a VIP.
+// Rollout-triggering changes require controlPlaneVIP or controlPlaneEndpoint
+// unless the development-only allowControlPlaneWithoutVIP setting is enabled.
+// maxSurge alone does not trigger a rollout and remains mutable without
+// either.
 type UpdateClusterControlPlaneConfig struct {
 	// AutoScaleDownDisabled When true, automatic control-plane scale-down is disabled, so decreasing desiredCount leaves the surplus nodes in place. When scale-down is enabled it never reduces the control plane below the fault-tolerant floor of three nodes.
 	AutoScaleDownDisabled *bool `json:"autoScaleDownDisabled,omitempty"`
 
 	// DesiredCount The desired number of cluster-level control plane nodes. Must be at least 1.
-	// Increasing the count above 1 requires controlPlaneVIP on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
+	// Increasing the count above 1 requires controlPlaneVIP or controlPlaneEndpoint on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
 	DesiredCount *int `json:"desiredCount,omitempty"`
 
 	// Infra The mutable infra provider control plane fields. Every field carries three states: omitted
@@ -1702,16 +1726,17 @@ type UpdateClusterRequest struct {
 	// ControlPlaneConfig Changes to `release` or the Kubernetes version start a control-plane
 	// rollout. All fields are optional. A provider payload that does not match the
 	// cluster's provider is rejected with 400.
-	// Rollout-triggering changes require controlPlaneVIP unless the development-only
-	// allowControlPlaneWithoutVIP setting is enabled. maxSurge alone does not
-	// trigger a rollout and remains mutable without a VIP.
+	// Rollout-triggering changes require controlPlaneVIP or controlPlaneEndpoint
+	// unless the development-only allowControlPlaneWithoutVIP setting is enabled.
+	// maxSurge alone does not trigger a rollout and remains mutable without
+	// either.
 	ControlPlaneConfig *UpdateClusterControlPlaneConfig `json:"controlPlaneConfig,omitempty"`
 
 	// ControlPlaneKubernetesVersion Target control-plane version, as X.Y.Z with no leading "v". Must be newer than
 	// the current version by at most one minor version and keep every worker pool
 	// within 3 minor versions.
-	// The cluster must have controlPlaneVIP configured unless the development-only
-	// allowControlPlaneWithoutVIP setting is enabled.
+	// The cluster must have controlPlaneVIP or controlPlaneEndpoint configured
+	// unless the development-only allowControlPlaneWithoutVIP setting is enabled.
 	ControlPlaneKubernetesVersion *string `json:"controlPlaneKubernetesVersion,omitempty"`
 
 	// EnableCPNodeRecycling Turn automatic control-plane node replacement on or off.
@@ -1766,9 +1791,9 @@ type UpdateInProgressType string
 // UpdateNodePoolRequest All fields are optional. A provider payload that does not match the node pool's
 // cluster is rejected with 400.
 // Updating a control-plane pool in a way that creates a replacement node set
-// requires controlPlaneVIP unless the development-only allowControlPlaneWithoutVIP
-// setting is enabled. maxSurge alone does not create a replacement
-// and remains mutable without a VIP.
+// requires controlPlaneVIP or controlPlaneEndpoint unless the development-only
+// allowControlPlaneWithoutVIP setting is enabled. maxSurge alone does not
+// create a replacement and remains mutable without either.
 type UpdateNodePoolRequest struct {
 	// AutoModeDisabled Disables auto-mode (automatic node recycling).
 	AutoModeDisabled *bool `json:"autoModeDisabled,omitempty"`
@@ -1779,7 +1804,7 @@ type UpdateNodePoolRequest struct {
 	// Description Free-text description.
 	Description *string `json:"description,omitempty"`
 
-	// DesiredNodeCount The desired number of nodes in the pool. Increasing aggregate control-plane capacity above 1 requires controlPlaneVIP on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
+	// DesiredNodeCount The desired number of nodes in the pool. Increasing aggregate control-plane capacity above 1 requires controlPlaneVIP or controlPlaneEndpoint on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
 	DesiredNodeCount *int `json:"desiredNodeCount,omitempty"`
 
 	// Infra The mutable infra provider node pool fields. Every field carries three states: omitted
