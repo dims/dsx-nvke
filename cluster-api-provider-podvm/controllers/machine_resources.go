@@ -48,6 +48,20 @@ const (
 	// networksAnnotation is the pod annotation that Multus reads.
 	networksAnnotation = "k8s.v1.cni.cncf.io/networks"
 
+	// nodeAgentPort is the secure port of nvke-agent. The startup probe of
+	// each pod connects to it, so the container counts as started when the
+	// agent accepts a connection. The NVKE controller calls the agent as soon
+	// as it knows the address of a machine, and each failed call costs it a
+	// retry wait that grows to minutes. So the provider reports the address
+	// only for a started container.
+	//
+	// The probe runs each 2 seconds and gives the node 20 minutes to come up:
+	// 600 failures of 2 seconds each. After that the kubelet starts the
+	// container again.
+	nodeAgentPort           = 15005
+	startupPeriodSeconds    = 2
+	startupFailureThreshold = 600
+
 	// apiServerPort and apiServerReadyPath describe the readiness probe of a
 	// control plane pod. A Service of the caller then sends traffic only to a
 	// pod whose API server is ready.
@@ -120,6 +134,18 @@ func (r *MachineReconciler) ownedPod(ctx context.Context, machine *infrav1.PodVM
 		return nil, resourceConflict("Pod", key)
 	}
 	return pod, nil
+}
+
+// nodeAgentAnswers reports whether the startup probe of the pod passed: the
+// container "node" is started, so the node agent accepts connections.
+func nodeAgentAnswers(pod *corev1.Pod) bool {
+	for i := range pod.Status.ContainerStatuses {
+		status := &pod.Status.ContainerStatuses[i]
+		if status.Name == nodeContainerName {
+			return ptr.Deref(status.Started, false)
+		}
+	}
+	return false
 }
 
 // deletePod deletes exactly the pod that the caller saw. The UID guards
@@ -410,6 +436,15 @@ func buildPod(
 		},
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: bootstrapVolumeName, MountPath: bootstrapMountPath, ReadOnly: true},
+		},
+		// For each machine, control plane or not: the node agent runs on
+		// every node.
+		StartupProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{
+				Port: intstr.FromInt32(nodeAgentPort),
+			}},
+			PeriodSeconds:    startupPeriodSeconds,
+			FailureThreshold: startupFailureThreshold,
 		},
 	}
 	if isControlPlane {

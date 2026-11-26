@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -146,10 +147,11 @@ func TestMachineReconcilerRejectsAnInfraClusterOfAnotherProvider(t *testing.T) {
 	require.ErrorContains(t, err, "not PodVMCluster")
 }
 
-// The first reconcile of a new machine: the address, then the Secret copy, the
-// claims and the pod. The NVKE controller reads the address from the status,
-// so the address must be there while the provider ID is still empty.
-func TestMachineReconcilerRecordsTheAddressBeforeTheProviderID(t *testing.T) {
+// The first reconcile of a new machine records the allocation and then makes
+// the Secret copy, the claims and the pod. The record keeps the address from a
+// second machine and tells a delete where to look. The machine does not report
+// the address yet: no node agent answers at it.
+func TestMachineReconcilerRecordsTheAllocationBeforeItMakesThePod(t *testing.T) {
 	reconciler, k8sClient := newMachineReconcilerForTest(t, machineObjects(newInfraMachine(testMachineName))...)
 
 	result := reconcileMachine(t, reconciler, testMachineName)
@@ -158,37 +160,56 @@ func TestMachineReconcilerRecordsTheAddressBeforeTheProviderID(t *testing.T) {
 	machine := getInfraMachine(t, k8sClient, testMachineName)
 	require.Equal(t, testFirstAddress, machine.Status.Address)
 	require.Equal(t, testFirstMAC, machine.Status.HardwareAddress)
-	require.Equal(t, []clusterv1.MachineAddress{
-		{Type: clusterv1.MachineInternalIP, Address: testFirstAddress},
-	}, machine.Status.Addresses)
 	require.Equal(t, testPodNamespace, machine.Status.PodNamespace)
 	require.Equal(t, testMachineName, machine.Status.PodName)
 
 	// The pod exists and does not run yet.
+	require.Empty(t, machine.Status.Addresses)
 	require.Empty(t, machine.Spec.ProviderID)
 	require.Nil(t, machine.Status.Initialization.Provisioned)
 	requireReadyCondition(t, machine.Status.Conditions, metav1.ConditionFalse, infrav1.WaitingForPodReason)
 	require.Equal(t, corev1.PodPhase(""), getPod(t, k8sClient, testMachineName).Status.Phase)
 }
 
-func TestMachineReconcilerReportsProvisionedWhenThePodRuns(t *testing.T) {
+// The NVKE controller calls the node agent as soon as it sees the address of a
+// machine, and a failed call costs it a long retry wait. So the machine reports
+// its address, its provider ID and the provisioned flag only when the node
+// agent in the pod answers, which is when the startup probe of the pod passes.
+func TestMachineReconcilerReportsTheMachineWhenTheNodeAgentAnswers(t *testing.T) {
 	reconciler, k8sClient := newMachineReconcilerForTest(t, machineObjects(newInfraMachine(testMachineName))...)
-
 	reconcileMachine(t, reconciler, testMachineName)
+
+	requireNotReported := func(wantReason string) {
+		t.Helper()
+		machine := getInfraMachine(t, k8sClient, testMachineName)
+		require.Empty(t, machine.Status.Addresses)
+		require.Empty(t, machine.Spec.ProviderID)
+		require.Nil(t, machine.Status.Initialization.Provisioned)
+		// The allocation is there all the time.
+		require.Equal(t, testFirstAddress, machine.Status.Address)
+		requireReadyCondition(t, machine.Status.Conditions, metav1.ConditionFalse, wantReason)
+	}
 
 	// A pod that is scheduled and pulls its image is not a node yet.
 	setPodPhase(t, k8sClient, testMachineName, corev1.PodPending)
-	reconcileMachine(t, reconciler, testMachineName)
-	machine := getInfraMachine(t, k8sClient, testMachineName)
-	require.Empty(t, machine.Spec.ProviderID)
-	require.Nil(t, machine.Status.Initialization.Provisioned)
+	require.Equal(t, ctrl.Result{}, reconcileMachine(t, reconciler, testMachineName))
+	requireNotReported(infrav1.WaitingForPodReason)
 
+	// The pod runs: the virtual machine boots, and no node agent answers yet.
 	setPodPhase(t, k8sClient, testMachineName, corev1.PodRunning)
+	require.Equal(t, ctrl.Result{}, reconcileMachine(t, reconciler, testMachineName))
+	requireNotReported(infrav1.WaitingForNodeAgentReason)
+
+	// The startup probe passes.
+	startNodeAgent(t, k8sClient, testMachineName)
 	result := reconcileMachine(t, reconciler, testMachineName)
 	// The new cluster has no kubeconfig yet, so the look at the Node waits.
 	require.Equal(t, retryAfter, result.RequeueAfter)
 
-	machine = getInfraMachine(t, k8sClient, testMachineName)
+	machine := getInfraMachine(t, k8sClient, testMachineName)
+	require.Equal(t, []clusterv1.MachineAddress{
+		{Type: clusterv1.MachineInternalIP, Address: testFirstAddress},
+	}, machine.Status.Addresses)
 	require.Equal(t, testProviderID, machine.Spec.ProviderID)
 	require.NotNil(t, machine.Status.Initialization.Provisioned)
 	require.True(t, *machine.Status.Initialization.Provisioned)
@@ -196,11 +217,81 @@ func TestMachineReconcilerReportsProvisionedWhenThePodRuns(t *testing.T) {
 	requireReadyCondition(t, machine.Status.Conditions, metav1.ConditionTrue, infrav1.PodRunningReason)
 }
 
+// A pod with a container of another name, or with no container status at all,
+// has no node agent that answers.
+func TestNodeAgentAnswers(t *testing.T) {
+	tests := []struct {
+		name     string
+		statuses []corev1.ContainerStatus
+		want     bool
+	}{
+		{name: "no container status", want: false},
+		{name: "the container is not started", statuses: []corev1.ContainerStatus{
+			{Name: "node", Started: ptr.To(false)},
+		}, want: false},
+		{name: "the started field is not set", statuses: []corev1.ContainerStatus{{Name: "node"}}, want: false},
+		{name: "another container is started", statuses: []corev1.ContainerStatus{
+			{Name: "sidecar", Started: ptr.To(true)},
+		}, want: false},
+		{name: "the container is started", statuses: []corev1.ContainerStatus{
+			{Name: "sidecar", Started: ptr.To(false)},
+			{Name: "node", Started: ptr.To(true)},
+		}, want: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pod := &corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodRunning, ContainerStatuses: test.statuses}}
+			require.Equal(t, test.want, nodeAgentAnswers(pod))
+		})
+	}
+}
+
+// The address is in status.addresses before the provider ID is set. No reader
+// ever sees a machine that has a provider ID and no address.
+func TestMachineReconcilerReportsTheAddressBeforeTheProviderID(t *testing.T) {
+	reconciler, k8sClient := newMachineReconcilerForTest(t, machineObjects(newInfraMachine(testMachineName))...)
+	reconcileMachine(t, reconciler, testMachineName)
+	startNodeAgent(t, k8sClient, testMachineName)
+
+	observer := &providerIDWriteObserver{Client: k8sClient}
+	reconciler.client = observer
+	reconcileMachine(t, reconciler, testMachineName)
+
+	require.Equal(t, 1, observer.providerIDWrites)
+	require.Equal(t, []clusterv1.MachineAddress{
+		{Type: clusterv1.MachineInternalIP, Address: testFirstAddress},
+	}, observer.addressesAtTheWrite)
+	require.Equal(t, testProviderID, getInfraMachine(t, k8sClient, testMachineName).Spec.ProviderID)
+}
+
+// providerIDWriteObserver records what status.addresses of a PodVMMachine
+// holds in the API server at the moment its provider ID is written.
+type providerIDWriteObserver struct {
+	client.Client
+	providerIDWrites    int
+	addressesAtTheWrite []clusterv1.MachineAddress
+}
+
+func (c *providerIDWriteObserver) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+	if machine, isMachine := obj.(*infrav1.PodVMMachine); isMachine && machine.Spec.ProviderID != "" {
+		stored := &infrav1.PodVMMachine{}
+		if err := c.Get(ctx, client.ObjectKeyFromObject(obj), stored); err != nil {
+			return err
+		}
+		if stored.Spec.ProviderID == "" {
+			c.providerIDWrites++
+			c.addressesAtTheWrite = stored.Status.Addresses
+		}
+	}
+	return c.Client.Patch(ctx, obj, patch, opts...)
+}
+
 // A reconcile of a machine in a steady state must write nothing. A write would
 // start the next reconcile, and the controller would never rest.
 func TestMachineReconcilerWritesNothingInASteadyState(t *testing.T) {
 	reconciler, k8sClient := newMachineReconcilerForTest(t, machineObjects(newInfraMachine(testMachineName))...)
-	reconcileUntilPodRuns(t, reconciler, k8sClient, testMachineName)
+	reconcileUntilNodeAgentAnswers(t, reconciler, k8sClient, testMachineName)
 	before := getInfraMachine(t, k8sClient, testMachineName)
 
 	reconcileMachine(t, reconciler, testMachineName)

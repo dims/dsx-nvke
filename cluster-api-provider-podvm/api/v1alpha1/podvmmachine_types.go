@@ -53,8 +53,9 @@ type PodVMVolumes struct {
 type PodVMMachineSpec struct {
 	// ProviderID names the pod of this machine, in the form
 	// podvm://<pod-namespace>/<pod-name>. The provider sets it once, when the
-	// pod runs for the first time. The provider never changes it and never
-	// clears it: a new pod for the same machine has the same name.
+	// node agent in the pod answers for the first time. The provider never
+	// changes it and never clears it: a new pod for the same machine has the
+	// same name.
 	// +optional
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=512
@@ -84,9 +85,9 @@ type PodVMMachineSpec struct {
 // Cluster API contract requires.
 // +kubebuilder:validation:MinProperties=1
 type PodVMMachineInitializationStatus struct {
-	// Provisioned is true when the pod of the machine ran for the first time.
-	// The provider never clears it: a pod that is lost later is made again
-	// for the same machine.
+	// Provisioned is true when the node agent in the pod of the machine
+	// answered for the first time. The provider never clears it: a pod that
+	// is lost later is made again for the same machine.
 	// +optional
 	Provisioned *bool `json:"provisioned,omitempty"`
 }
@@ -98,9 +99,11 @@ type PodVMMachineStatus struct {
 	Initialization PodVMMachineInitializationStatus `json:"initialization,omitempty,omitzero"`
 
 	// Addresses holds the fixed address of the machine as its internal IP
-	// address. The provider writes it before the pod exists. Cluster API
-	// copies it to the Machine, and the NVKE controller reads it to find the
-	// node agent.
+	// address. Cluster API copies it to the Machine, and the NVKE controller
+	// reads it to find the node agent and calls the agent at once. So the
+	// provider writes it when the node agent in the pod answers, just before
+	// the provider ID, and never clears it. The address itself is in
+	// status.address from the allocation on.
 	// +optional
 	Addresses []clusterv1.MachineAddress `json:"addresses,omitempty"`
 

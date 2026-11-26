@@ -59,7 +59,13 @@ const (
 	// pod of a provisioned machine was lost and its new pod does not run yet.
 	WaitingForPodReason = "WaitingForPod"
 
-	// PodRunningReason means the pod of the machine runs.
+	// WaitingForNodeAgentReason means the pod runs and the node agent in it
+	// does not answer yet. The startup probe of the pod decides: the machine
+	// is not ready before the agent accepts a connection.
+	WaitingForNodeAgentReason = "WaitingForNodeAgent"
+
+	// PodRunningReason means the pod of the machine runs and the node agent in
+	// it answers.
 	PodRunningReason = "PodRunning"
 
 	// NodeProviderIDConflictReason means the Node of the new cluster already

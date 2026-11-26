@@ -46,7 +46,7 @@ func TestMachineReconcilerMakesALostPodAgainWithTheSameIdentity(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			reconciler, k8sClient := newMachineReconcilerForTest(t, machineObjects(newInfraMachine(testMachineName))...)
-			reconcileUntilPodRuns(t, reconciler, k8sClient, testMachineName)
+			reconcileUntilNodeAgentAnswers(t, reconciler, k8sClient, testMachineName)
 
 			firstPod := getPod(t, k8sClient, testMachineName)
 			markKept(t, k8sClient, &corev1.PersistentVolumeClaim{}, varClaimName(testMachineName))
@@ -89,18 +89,31 @@ func TestMachineReconcilerMakesALostPodAgainWithTheSameIdentity(t *testing.T) {
 				client.ObjectKey{Namespace: testPodNamespace, Name: bootstrapSecretName(testMachineName)}, secretCopy))
 			require.Equal(t, []byte(testBootstrapData), secretCopy.Data["value"])
 
-			// The machine keeps what it is known by.
-			machine := getInfraMachine(t, k8sClient, testMachineName)
-			require.Equal(t, testProviderID, machine.Spec.ProviderID)
-			require.Equal(t, testFirstAddress, machine.Status.Address)
-			require.Equal(t, testFirstMAC, machine.Status.HardwareAddress)
-			require.True(t, *machine.Status.Initialization.Provisioned)
-			requireReadyCondition(t, machine.Status.Conditions, metav1.ConditionFalse, infrav1.WaitingForPodReason)
+			// The machine keeps what the NVKE controller knows it by, while the
+			// new pod starts. A removed address or provider ID would look like
+			// a lost machine. Only the Ready condition says that the node is
+			// not there.
+			requireStillReported := func(wantStatus metav1.ConditionStatus, wantReason string) {
+				t.Helper()
+				machine := getInfraMachine(t, k8sClient, testMachineName)
+				require.Equal(t, []clusterv1.MachineAddress{
+					{Type: clusterv1.MachineInternalIP, Address: testFirstAddress},
+				}, machine.Status.Addresses)
+				require.Equal(t, testProviderID, machine.Spec.ProviderID)
+				require.Equal(t, testFirstAddress, machine.Status.Address)
+				require.Equal(t, testFirstMAC, machine.Status.HardwareAddress)
+				require.True(t, *machine.Status.Initialization.Provisioned)
+				requireReadyCondition(t, machine.Status.Conditions, wantStatus, wantReason)
+			}
+			requireStillReported(metav1.ConditionFalse, infrav1.WaitingForPodReason)
 
 			setPodPhase(t, k8sClient, testMachineName, corev1.PodRunning)
 			reconcileMachine(t, reconciler, testMachineName)
-			requireReadyCondition(t, getInfraMachine(t, k8sClient, testMachineName).Status.Conditions,
-				metav1.ConditionTrue, infrav1.PodRunningReason)
+			requireStillReported(metav1.ConditionFalse, infrav1.WaitingForNodeAgentReason)
+
+			startNodeAgent(t, k8sClient, testMachineName)
+			reconcileMachine(t, reconciler, testMachineName)
+			requireStillReported(metav1.ConditionTrue, infrav1.PodRunningReason)
 		})
 	}
 }
@@ -111,7 +124,7 @@ func TestMachineReconcilerReplacesAPodThatEnded(t *testing.T) {
 	for _, phase := range []corev1.PodPhase{corev1.PodFailed, corev1.PodSucceeded} {
 		t.Run(string(phase), func(t *testing.T) {
 			reconciler, k8sClient := newMachineReconcilerForTest(t, machineObjects(newInfraMachine(testMachineName))...)
-			reconcileUntilPodRuns(t, reconciler, k8sClient, testMachineName)
+			reconcileUntilNodeAgentAnswers(t, reconciler, k8sClient, testMachineName)
 			markKept(t, k8sClient, &corev1.Pod{}, testMachineName)
 
 			setPodPhase(t, k8sClient, testMachineName, phase)
@@ -132,7 +145,7 @@ func TestMachineReconcilerReplacesAPodThatEnded(t *testing.T) {
 // provider waits for it to be gone.
 func TestMachineReconcilerWaitsForAPodThatIsBeingDeleted(t *testing.T) {
 	reconciler, k8sClient := newMachineReconcilerForTest(t, machineObjects(newInfraMachine(testMachineName))...)
-	reconcileUntilPodRuns(t, reconciler, k8sClient, testMachineName)
+	reconcileUntilNodeAgentAnswers(t, reconciler, k8sClient, testMachineName)
 	holdPod(t, k8sClient, testMachineName)
 
 	require.NoError(t, k8sClient.Delete(context.Background(), getPod(t, k8sClient, testMachineName)))
@@ -153,7 +166,7 @@ func TestMachineReconcilerWaitsForAPodThatIsBeingDeleted(t *testing.T) {
 // provider reports it and makes no pod that would start with nothing.
 func TestMachineReconcilerDoesNotMakeALostPodWithNoBootstrapData(t *testing.T) {
 	reconciler, k8sClient := newMachineReconcilerForTest(t, machineObjects(newInfraMachine(testMachineName))...)
-	reconcileUntilPodRuns(t, reconciler, k8sClient, testMachineName)
+	reconcileUntilNodeAgentAnswers(t, reconciler, k8sClient, testMachineName)
 
 	for _, secret := range []*corev1.Secret{
 		newBootstrapDataSecret(testMachineName),
@@ -175,7 +188,7 @@ func TestMachineReconcilerDoesNotMakeALostPodWithNoBootstrapData(t *testing.T) {
 // time: it deletes the pod, and the lost pod rule makes the pod again.
 func TestMachineReconcilerAnswersARebootRequestOneTime(t *testing.T) {
 	reconciler, k8sClient := newMachineReconcilerForTest(t, machineObjects(newInfraMachine(testMachineName))...)
-	reconcileUntilPodRuns(t, reconciler, k8sClient, testMachineName)
+	reconcileUntilNodeAgentAnswers(t, reconciler, k8sClient, testMachineName)
 	markKept(t, k8sClient, &corev1.Pod{}, testMachineName)
 	markKept(t, k8sClient, &corev1.PersistentVolumeClaim{}, varClaimName(testMachineName))
 
@@ -206,7 +219,7 @@ func TestMachineReconcilerAnswersARebootRequestOneTime(t *testing.T) {
 	// The annotation stays until the NVKE controller sees the new boot ID.
 	// The new pod must survive every reconcile in that time.
 	markKept(t, k8sClient, &corev1.Pod{}, testMachineName)
-	setPodPhase(t, k8sClient, testMachineName, corev1.PodRunning)
+	startNodeAgent(t, k8sClient, testMachineName)
 	for range 3 {
 		reconcileMachine(t, reconciler, testMachineName)
 	}
@@ -230,7 +243,7 @@ func TestMachineReconcilerAnswersARebootRequestOneTime(t *testing.T) {
 // shutdown. The provider records the request and does not delete the next pod.
 func TestMachineReconcilerRecordsARebootRequestForAPodThatIsBeingDeleted(t *testing.T) {
 	reconciler, k8sClient := newMachineReconcilerForTest(t, machineObjects(newInfraMachine(testMachineName))...)
-	reconcileUntilPodRuns(t, reconciler, k8sClient, testMachineName)
+	reconcileUntilNodeAgentAnswers(t, reconciler, k8sClient, testMachineName)
 	holdPod(t, k8sClient, testMachineName)
 	require.NoError(t, k8sClient.Delete(context.Background(), getPod(t, k8sClient, testMachineName)))
 
@@ -299,10 +312,20 @@ func TestMachineReconcilerDeletesAMachineInEachState(t *testing.T) {
 			},
 		},
 		{
+			name:    "pod runs and the node agent does not answer yet",
+			objects: func() []client.Object { return machineObjects(newInfraMachine(testMachineName)) },
+			prepare: func(t *testing.T, reconciler *MachineReconciler, k8sClient client.Client) bool {
+				reconcileMachine(t, reconciler, testMachineName)
+				setPodPhase(t, k8sClient, testMachineName, corev1.PodRunning)
+				reconcileMachine(t, reconciler, testMachineName)
+				return true
+			},
+		},
+		{
 			name:    "pod runs",
 			objects: func() []client.Object { return machineObjects(newInfraMachine(testMachineName)) },
 			prepare: func(t *testing.T, reconciler *MachineReconciler, k8sClient client.Client) bool {
-				reconcileUntilPodRuns(t, reconciler, k8sClient, testMachineName)
+				reconcileUntilNodeAgentAnswers(t, reconciler, k8sClient, testMachineName)
 				return true
 			},
 		},
@@ -310,7 +333,7 @@ func TestMachineReconcilerDeletesAMachineInEachState(t *testing.T) {
 			name:    "pod runs and the PodVMCluster is already gone",
 			objects: func() []client.Object { return machineObjects(newInfraMachine(testMachineName)) },
 			prepare: func(t *testing.T, reconciler *MachineReconciler, k8sClient client.Client) bool {
-				reconcileUntilPodRuns(t, reconciler, k8sClient, testMachineName)
+				reconcileUntilNodeAgentAnswers(t, reconciler, k8sClient, testMachineName)
 				require.NoError(t, k8sClient.Delete(context.Background(), newInfraCluster()))
 				require.NoError(t, k8sClient.Delete(context.Background(), newCAPICluster()))
 				return true
@@ -320,7 +343,7 @@ func TestMachineReconcilerDeletesAMachineInEachState(t *testing.T) {
 			name:    "pod lost and not made again yet",
 			objects: func() []client.Object { return machineObjects(newInfraMachine(testMachineName)) },
 			prepare: func(t *testing.T, reconciler *MachineReconciler, k8sClient client.Client) bool {
-				reconcileUntilPodRuns(t, reconciler, k8sClient, testMachineName)
+				reconcileUntilNodeAgentAnswers(t, reconciler, k8sClient, testMachineName)
 				require.NoError(t, k8sClient.Delete(context.Background(), getPod(t, k8sClient, testMachineName)))
 				return true
 			},
@@ -364,7 +387,7 @@ func TestMachineReconcilerDeletesAMachineInEachState(t *testing.T) {
 // moment the machine is gone, and a pod that still runs would share it.
 func TestMachineReconcilerKeepsTheFinalizerUntilThePodIsGone(t *testing.T) {
 	reconciler, k8sClient := newMachineReconcilerForTest(t, machineObjects(newInfraMachine(testMachineName))...)
-	reconcileUntilPodRuns(t, reconciler, k8sClient, testMachineName)
+	reconcileUntilNodeAgentAnswers(t, reconciler, k8sClient, testMachineName)
 	holdPod(t, k8sClient, testMachineName)
 
 	require.NoError(t, k8sClient.Delete(context.Background(), getInfraMachine(t, k8sClient, testMachineName)))
@@ -485,7 +508,7 @@ func releasePod(t *testing.T, k8sClient client.Client, name string) {
 func TestMachineReconcilerDoesNotAnswerARebootRequestTwiceWithAStaleCache(t *testing.T) {
 	const request = "2026-11-26T22:30:00Z"
 	reconciler, cached := newMachineReconcilerForTest(t, machineObjects(newInfraMachine(testMachineName))...)
-	reconcileUntilPodRuns(t, reconciler, cached, testMachineName)
+	reconcileUntilNodeAgentAnswers(t, reconciler, cached, testMachineName)
 	setRebootAnnotation(t, cached, request)
 	markKept(t, cached, &corev1.Pod{}, testMachineName)
 
@@ -505,11 +528,11 @@ func TestMachineReconcilerDoesNotAnswerARebootRequestTwiceWithAStaleCache(t *tes
 // it again.
 func TestMachineReconcilerReadsTheRebootRecordFromTheCacheWhenItIsThere(t *testing.T) {
 	reconciler, k8sClient := newMachineReconcilerForTest(t, machineObjects(newInfraMachine(testMachineName))...)
-	reconcileUntilPodRuns(t, reconciler, k8sClient, testMachineName)
+	reconcileUntilNodeAgentAnswers(t, reconciler, k8sClient, testMachineName)
 	setRebootAnnotation(t, k8sClient, "2026-11-26T22:30:00Z")
 	reconcileMachine(t, reconciler, testMachineName)
 	reconcileMachine(t, reconciler, testMachineName)
-	setPodPhase(t, k8sClient, testMachineName, corev1.PodRunning)
+	startNodeAgent(t, k8sClient, testMachineName)
 
 	reconciler.apiReader = &noMachineReader{Reader: k8sClient}
 

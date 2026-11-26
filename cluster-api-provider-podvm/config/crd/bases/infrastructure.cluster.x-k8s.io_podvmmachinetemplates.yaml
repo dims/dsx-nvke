@@ -90,8 +90,9 @@ spec:
                         description: |-
                           ProviderID names the pod of this machine, in the form
                           podvm://<pod-namespace>/<pod-name>. The provider sets it once, when the
-                          pod runs for the first time. The provider never changes it and never
-                          clears it: a new pod for the same machine has the same name.
+                          node agent in the pod answers for the first time. The provider never
+                          changes it and never clears it: a new pod for the same machine has the
+                          same name.
                         maxLength: 512
                         minLength: 1
                         type: string

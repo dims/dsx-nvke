@@ -148,12 +148,12 @@ func newInfraMachine(name string) *infrav1.PodVMMachine {
 }
 
 // newAllocatedInfraMachine builds a machine that already holds an address and
-// records where its pod is, the state after the first reconcile.
+// records where its pod is, the state after the first reconcile. It does not
+// report the address in status.addresses yet: no node agent answers.
 func newAllocatedInfraMachine(name, address string) *infrav1.PodVMMachine {
 	machine := newInfraMachine(name)
 	machine.Status.Address = address
 	machine.Status.HardwareAddress = mustHardwareAddress(address)
-	machine.Status.Addresses = []clusterv1.MachineAddress{{Type: clusterv1.MachineInternalIP, Address: address}}
 	machine.Status.PodNamespace = testPodNamespace
 	machine.Status.PodName = name
 	return machine
@@ -220,20 +220,37 @@ func requireGone(t *testing.T, k8sClient client.Client, obj client.Object, name 
 	require.True(t, apierrors.IsNotFound(err), "expected %T %s to be gone, got %v", obj, name, err)
 }
 
-// setPodPhase plays the part of the kubelet.
+// setPodPhase plays the part of the kubelet. A pod in the phase Running has
+// its container, and the startup probe of that container has not passed: the
+// virtual machine boots and no node agent answers.
 func setPodPhase(t *testing.T, k8sClient client.Client, name string, phase corev1.PodPhase) {
 	t.Helper()
 	pod := getPod(t, k8sClient, name)
 	pod.Status.Phase = phase
+	pod.Status.ContainerStatuses = nil
+	if phase == corev1.PodRunning {
+		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "node", Started: ptr.To(false)}}
+	}
 	require.NoError(t, k8sClient.Status().Update(context.Background(), pod))
 }
 
-// reconcileUntilPodRuns takes a new machine to the state "pod runs": the first
-// reconcile makes the pod, the kubelet starts it, the second reconcile sees it.
-func reconcileUntilPodRuns(t *testing.T, reconciler *MachineReconciler, k8sClient client.Client, name string) {
+// startNodeAgent plays the kubelet at the moment the startup probe passes: the
+// pod runs and the node agent in it accepts a connection.
+func startNodeAgent(t *testing.T, k8sClient client.Client, name string) {
+	t.Helper()
+	pod := getPod(t, k8sClient, name)
+	pod.Status.Phase = corev1.PodRunning
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "node", Started: ptr.To(true)}}
+	require.NoError(t, k8sClient.Status().Update(context.Background(), pod))
+}
+
+// reconcileUntilNodeAgentAnswers takes a new machine to the state "the node is
+// up": the first reconcile makes the pod, the node agent in it starts to
+// answer, the second reconcile sees it.
+func reconcileUntilNodeAgentAnswers(t *testing.T, reconciler *MachineReconciler, k8sClient client.Client, name string) {
 	t.Helper()
 	reconcileMachine(t, reconciler, name)
-	setPodPhase(t, k8sClient, name, corev1.PodRunning)
+	startNodeAgent(t, k8sClient, name)
 	reconcileMachine(t, reconciler, name)
 }
 

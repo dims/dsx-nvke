@@ -99,15 +99,36 @@ waits for the provider.
 2. Take the lowest free address of the range. The set of used addresses is
    status.address of every PodVMMachine, read from the API server at that
    moment. There is no allocation table.
-3. Write status.addresses, status.address, status.hardwareAddress,
-   status.podNamespace and status.podName. This happens before any object
-   exists, and before spec.providerID.
+3. Write status.address, status.hardwareAddress, status.podNamespace and
+   status.podName. This happens before any object exists.
 4. Copy the bootstrap Secret into the pod namespace, one time.
 5. Make the two volume claims and the pod.
-6. When the pod runs, write spec.providerID and
-   status.initialization.provisioned.
+6. When the node agent in the pod answers, write status.addresses, then
+   spec.providerID, then status.initialization.provisioned.
 7. Set spec.providerID on the Node of the new cluster.
 ```
+
+### When a machine is ready
+
+A machine is ready when the node agent in its pod answers. The pod has a startup
+probe that opens a TCP connection to port 15005, the secure port of
+`nvke-agent`, each 2 seconds. When the connection works, the kubelet marks the
+container `node` as started. The provider then writes `status.addresses`, the
+provider ID and the provisioned flag, in that order.
+
+The reason is the next step of the NVKE controller. It waits for an address,
+stores it one time, and calls the node agent at that address a moment later. A
+failed call costs it a retry wait that starts at 30 seconds and grows to 2
+minutes. So the provider does not report the address at the allocation, when no
+pod exists. `status.address` holds the address from the allocation on, for the
+uniqueness rule and for an operator.
+
+The probe gives a node 20 minutes to come up. After that the kubelet starts the
+container again, with the same volumes.
+
+Until then the `Ready` condition is false. The reason is `WaitingForPod` while
+the pod does not run, and `WaitingForNodeAgent` while the pod runs and the agent
+does not answer.
 
 The controller reconciles one machine at a time, and the Deployment runs with
 leader election. Both are needed: step 2 is safe only when one writer gives out
@@ -134,6 +155,7 @@ This is the contract with the node image. The image side is not in this module.
 | Network annotation | `k8s.v1.cni.cncf.io/networks` with one entry: the name and the namespace of the network attachment, `ips` with the address, `mac` with the hardware address |
 | Hardware address | `02:00` and the four bytes of the address. `172.28.1.21` gives `02:00:ac:1c:01:15` |
 | Labels | `cluster.x-k8s.io/cluster-name`, `cluster.x-k8s.io/control-plane` when the Machine has it, `podvm.infrastructure.cluster.x-k8s.io/machine-name`, and three labels that name the owner `PodVMMachine` |
+| Startup probe | For each machine: a TCP connection to port 15005 (`nvke-agent`), each 2 seconds, for at most 20 minutes |
 | Readiness probe | For a control plane machine: HTTPS GET `/readyz` on port 6443, each 2 seconds |
 | Provider ID | `podvm://<pod-namespace>/<pod-name>` |
 
@@ -158,6 +180,11 @@ keeps its state on the two volumes. The provider does not copy the bootstrap
 Secret again when the copy exists. A pod in the phase `Failed` or `Succeeded`
 counts as lost: the provider deletes it and makes it again.
 
+While the new pod starts, `status.addresses`, the provider ID and the
+provisioned flag stay as they are. The NVKE controller already knows the node
+by them, and a removed address would look like a lost machine. Only the `Ready`
+condition says that the node is not there yet.
+
 The NVKE controller asks for a hard reboot with the annotation
 `nvke.nvidia.com/reboot` on the Machine. The provider answers each new value of
 the annotation one time: it deletes the pod, and the rule above makes the pod
@@ -180,7 +207,7 @@ the machine. An object with the same name that belongs to something else stays.
 
 ## How the Node gets its provider ID
 
-After the pod runs, the machine controller reads the standard CAPI
+After the node agent answers, the machine controller reads the standard CAPI
 `<cluster-name>-kubeconfig` Secret from the cluster namespace. It uses that
 kubeconfig to find the Node with the name of the Machine in the new cluster and
 sets `Node.spec.providerID`.

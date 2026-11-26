@@ -6,6 +6,7 @@ package controllers
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -118,6 +119,21 @@ func TestMachineReconcilerMakesThePodOfTheContract(t *testing.T) {
 		FailureThreshold: 1,
 	}, container.ReadinessProbe)
 	require.Nil(t, container.LivenessProbe)
+
+	// The startup probe: a TCP connection to the secure port of the node
+	// agent, each 2 seconds. The container counts as started when the agent
+	// accepts it, and the machine reports its address at that moment.
+	require.Equal(t, &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{TCPSocket: &corev1.TCPSocketAction{
+			Port: intstr.FromInt32(15005),
+		}},
+		PeriodSeconds:    2,
+		FailureThreshold: 600,
+	}, container.StartupProbe)
+	// The node has 20 minutes to come up before the kubelet starts the
+	// container again.
+	budget := time.Duration(container.StartupProbe.PeriodSeconds*container.StartupProbe.FailureThreshold) * time.Second
+	require.Equal(t, 20*time.Minute, budget)
 }
 
 func TestMachineReconcilerMakesTheVolumeClaimsAndTheSecretCopy(t *testing.T) {
@@ -169,6 +185,9 @@ func TestBuildPodFollowsTheMachineAndTheCluster(t *testing.T) {
 			check: func(t *testing.T, pod *corev1.Pod) {
 				require.NotContains(t, pod.Labels, clusterv1.MachineControlPlaneLabel)
 				require.Nil(t, pod.Spec.Containers[0].ReadinessProbe)
+				// The node agent runs on every node, so a worker has the
+				// startup probe too.
+				require.Equal(t, int32(15005), pod.Spec.Containers[0].StartupProbe.TCPSocket.Port.IntVal)
 			},
 		},
 		{

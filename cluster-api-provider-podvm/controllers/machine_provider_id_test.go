@@ -103,15 +103,17 @@ func TestMachineReconcilerReportsProvisionedWhenTheTenantClientFails(t *testing.
 	requireReadyCondition(t, machine.Status.Conditions, metav1.ConditionTrue, infrav1.PodRunningReason)
 }
 
-// The Node gets its provider ID only from a pod that runs.
-func TestMachineReconcilerDoesNotLookAtTheTenantNodeBeforeThePodRuns(t *testing.T) {
+// The Node gets its provider ID only from a pod whose node agent answers.
+func TestMachineReconcilerDoesNotLookAtTheTenantNodeBeforeTheNodeAgentAnswers(t *testing.T) {
 	reconciler, k8sClient := newMachineReconcilerForTest(t, machineObjects(newInfraMachine(testMachineName))...)
 	factory := &fakeTenantClientFactory{err: fmt.Errorf("must not be called")}
 	reconciler.tenantClients = factory
 
 	reconcileMachine(t, reconciler, testMachineName)
-	setPodPhase(t, k8sClient, testMachineName, corev1.PodPending)
-	reconcileMachine(t, reconciler, testMachineName)
+	for _, phase := range []corev1.PodPhase{corev1.PodPending, corev1.PodRunning} {
+		setPodPhase(t, k8sClient, testMachineName, phase)
+		reconcileMachine(t, reconciler, testMachineName)
+	}
 
 	require.Zero(t, factory.calls)
 }
@@ -153,8 +155,8 @@ func (f *fakeTenantClientFactory) ClientForCluster(context.Context, *clusterv1.C
 	return f.client, f.err
 }
 
-// newMachineReconcilerWithTenant builds a machine whose pod runs, and a new
-// cluster with the Node of that machine.
+// newMachineReconcilerWithTenant builds a machine whose pod runs with a node
+// agent that answers, and a new cluster with the Node of that machine.
 func newMachineReconcilerWithTenant(
 	t *testing.T,
 	nodeProviderID string,
@@ -173,7 +175,7 @@ func newMachineReconcilerWithTenant(
 	// The first reconcile makes the pod. The Node is not looked at yet.
 	reconcileMachine(t, reconciler, testMachineName)
 	require.Zero(t, factory.calls)
-	setPodPhase(t, k8sClient, testMachineName, corev1.PodRunning)
+	startNodeAgent(t, k8sClient, testMachineName)
 	return reconciler, tenantClient, factory
 }
 
