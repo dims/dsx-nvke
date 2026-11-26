@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The SPIRE server for the nodes that NVKE makes. NVKE writes the address of the kind node
+# (172.30.0.2) and this NodePort into agent.conf of each node.
+#
+# Copy of cli/internal/bootstrap/controllerdeploy/manifests/spire-server-nodeport.yaml at
+# bcc4376f, with the namespace added. The Service of the chart (spire-server, ClusterIP,
+# port 8081) does not change. The controller and the SPIRE agent of the kind node use that one.
+#
+# The selector is the labels that the chart "spire" puts on the server pods.
+# The NodePort listens on the address of the kind node only. The Docker network kata-cp is
+# a bridge of the host, so no listener is on the LAN or on Tailscale.
+apiVersion: v1
+kind: Service
+metadata:
+  name: spire-server-external
+  namespace: spire-server
+  labels:
+    app.kubernetes.io/name: server
+    app.kubernetes.io/managed-by: kata-cp-lab
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: server
+    app.kubernetes.io/instance: spire
+  ports:
+    - name: grpc
+      protocol: TCP
+      targetPort: grpc
+      port: 8081
+      nodePort: 30081

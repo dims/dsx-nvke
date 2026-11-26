@@ -1,0 +1,71 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Values for the chart "temporal" 0.74.0 from https://go.temporal.io/helm-charts.
+# Copy of cli/internal/bootstrap/controllerdeploy/manifests/temporal-values.yaml at bcc4376f.
+# The two sql.password fields come from secrets/temporal-secret-values.yaml.
+#
+# Lab change: the three images come from the Docker Hub mirror (image.repository of server,
+# admintools and web). The tags of the chart stay: 1.30.3, 1.30.3 and 2.48.1.
+server:
+  image:
+    repository: mirror.gcr.io/temporalio/server
+  configMapsToMount: sprig
+  setConfigFilePath: true
+  config:
+    persistence:
+      driver: sql
+      default:
+        driver: sql
+        sql:
+          driver: postgres12
+          host: postgres-postgresql.postgres.svc.cluster.local
+          port: 5432
+          database: temporal
+          user: postgres
+          maxConns: 10
+          maxIdleConns: 5
+      visibility:
+        driver: sql
+        sql:
+          driver: postgres12
+          host: postgres-postgresql.postgres.svc.cluster.local
+          port: 5432
+          database: temporal_visibility
+          user: postgres
+          maxConns: 10
+          maxIdleConns: 5
+
+admintools:
+  image:
+    repository: mirror.gcr.io/temporalio/admin-tools
+
+web:
+  image:
+    repository: mirror.gcr.io/temporalio/ui
+
+cassandra:
+  enabled: false
+
+mysql:
+  enabled: false
+
+postgresql:
+  enabled: false
+
+prometheus:
+  enabled: false
+
+grafana:
+  enabled: false
+
+elasticsearch:
+  enabled: false
+
+schema:
+  createDatabase:
+    enabled: true
+  setup:
+    enabled: true
+  update:
+    enabled: true

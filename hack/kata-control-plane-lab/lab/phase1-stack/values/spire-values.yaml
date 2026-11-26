@@ -1,0 +1,77 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Values for the chart "spire" 0.30.1 from https://spiffe.github.io/helm-charts-hardened/.
+# Base: cli/internal/bootstrap/controllerdeploy/manifests/spire-values.yaml at bcc4376f.
+# The values that nvkectl passes as flags (controllerdeploy.go:1265-1287) are literals here.
+#
+# The chart installs the SPIRE server, the SPIRE agent of the kind node, the SPIFFE CSI driver
+# and the SPIRE controller manager, all in the namespace spire-server.
+# The SPIRE server of gate 1 in the namespace gate1-nvke-spire is a different install and
+# does not change.
+
+global:
+  spire:
+    clusterName: kata-cp
+    # Must be the same as spiffe.trustDomain in controller-values.yaml and TRUST_DOMAIN in env.sh.
+    trustDomain: kata-cp.nvke.local
+  installAndUpgradeHooks:
+    enabled: false
+  deleteHooks:
+    enabled: false
+
+spire-agent:
+  # The port of the SPIRE server Service. The chart does not derive it from the Service
+  # (controllerdeploy.go:94-100).
+  server:
+    port: 8081
+  workloadAttestors:
+    k8s:
+      enabled: true
+      disableContainerSelectors: true
+
+spire-server:
+  # The controller makes join tokens through the SPIRE server API, so its ID must be an
+  # admin ID (controller/internal/spiffe/join_token.go:52-80).
+  adminIDs:
+    - spiffe://kata-cp.nvke.local/nvke-service/nvke-controller
+  # 8081 is the port that the controller dials by default for join tokens
+  # (controller/internal/config/config.go:348).
+  service:
+    port: 8081
+  # Lab change: the busybox image of the init container "chown" comes from the Docker Hub
+  # mirror. The tag of the chart stays (1.37.0-uclibc). It is the only Docker Hub image of
+  # this chart with these values.
+  chown:
+    image:
+      registry: mirror.gcr.io
+      repository: library/busybox
+  controllerManager:
+    # Must be the same as spiffe.spire.className of the controller chart
+    # (controllerdeploy.go:106-118).
+    className: spire-mgmt-spire
+    validatingWebhookConfiguration:
+      failurePolicy: Ignore
+    identities:
+      clusterSPIFFEIDs:
+        default:
+          namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: NotIn
+                values:
+                  - nvke-controller
+        nvke-service:
+          enabled: true
+          spiffeIDTemplate: "spiffe://{{ .TrustDomain }}/nvke-service/{{ .PodSpec.ServiceAccountName }}"
+          namespaceSelector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                  - nvke-controller
+          fallback: false
+
+# No OIDC provider, so SPIRE needs no cert-manager object.
+spiffe-oidc-discovery-provider:
+  enabled: false

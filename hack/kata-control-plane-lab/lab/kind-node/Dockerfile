@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # kind node image for the lab: the stock node image plus a D-Bus system bus.
 # The Rust runtime of Kata asks systemd over D-Bus for the cgroup of each sandbox,
 # and the stock kind node has no D-Bus daemon. A site node has one.

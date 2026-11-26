@@ -4,6 +4,9 @@
 # cluster (ConfigMap kubeadm-config), so this file names no etcd setting.
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: JoinConfiguration
+# Only with ETCD_PATCH=1: the patches folder that NVKE also sets for a join. #@etcdpatch
+patches: #@etcdpatch
+  directory: /etc/kubernetes/patches #@etcdpatch
 discovery:
   bootstrapToken:
     apiServerEndpoint: ${IP_API}:6443

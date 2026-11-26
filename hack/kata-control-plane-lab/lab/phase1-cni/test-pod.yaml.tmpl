@@ -1,0 +1,22 @@
+# One pod on the pod network of the inner cluster. It uses an image that the node already has
+# (the OVN image from the image package), so the node pulls nothing. run.sh fills ${TEST_IMAGE}.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: p1-net-test
+  namespace: default
+  labels: {app: p1-net-test}
+spec:
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 2
+  automountServiceAccountToken: false
+  # kubeadm gives the first node the control plane taint.
+  tolerations:
+    - {operator: Exists}
+  containers:
+    - name: test
+      image: ${TEST_IMAGE}
+      imagePullPolicy: Never
+      command: ["sleep", "86400"]
+      resources:
+        requests: {cpu: 10m, memory: 16Mi}

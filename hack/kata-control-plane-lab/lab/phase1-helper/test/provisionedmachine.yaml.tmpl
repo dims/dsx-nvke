@@ -1,0 +1,18 @@
+# A hand-made ProvisionedMachine for the test. It has no providerID, so the provisioned
+# provider makes no host claim for it and lets it go at deletion
+# (cluster-api-provider-provisioned/controllers/machine_controller.go:104-119).
+# The test sets status.hostName and status.initialization.provisioned with a status patch,
+# as the provider does when a machine holds a host (machine_controller.go:492-509).
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: ProvisionedMachine
+metadata:
+  name: __NODE__
+  namespace: __NS__
+  labels:
+    cluster.x-k8s.io/cluster-name: helper-test
+  ownerReferences:
+    - apiVersion: cluster.x-k8s.io/v1beta2
+      kind: Machine
+      name: __NODE__
+      uid: __MACHINE_UID__
+spec: {}

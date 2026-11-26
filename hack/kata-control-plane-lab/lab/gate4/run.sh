@@ -40,6 +40,10 @@
 #                             a peer in the DNS of the host cluster. Use it with ETP=Local and ETCD_SAN_SKIP=0:
 #                             with ETP=Cluster the source of a call is an address of the host node, not the pod IP.
 #   INSTANCE=1|2              2 = a second cluster next to the first one: namespace gate4b, other addresses and devices
+#   ETCD_PATCH=0|1            1 = the two etcd settings come from a kubeadm patch file in the pod
+#                             (/etc/kubernetes/patches/etcd+json.json), not from the kubeadm config. NVKE sets that
+#                             patches folder for init and join, so this is the form that needs no NVKE change.
+#                             Use it with ETCD_LISTEN=default and ETCD_SAN_SKIP=0.
 #   ADDR_FORM=eth0|bridge|none  where the node address is in the pod
 #   REPAIR=off|on             the address repair of the kind entrypoint
 #   OWNER=sts|bare            the owner that node-up makes
@@ -72,6 +76,7 @@ ETCD_LISTEN=${ETCD_LISTEN:-all}
 ETCD_SAN_SKIP=${ETCD_SAN_SKIP:-1}
 ETP=${ETP:-Cluster}
 ETCD_PEER_DNS=${ETCD_PEER_DNS:-0}
+ETCD_PATCH=${ETCD_PATCH:-0}
 ADDR_FORM=${ADDR_FORM:-eth0}
 REPAIR=${REPAIR:-off}
 OWNER=${OWNER:-sts}
@@ -167,6 +172,7 @@ render() {
   [ "$ETCD_SAN_SKIP" = 1 ] || drop+=(-e '/#@etcdsan$/d')
   [ "$ETCD_LISTEN" = all ] || [ "$ETCD_SAN_SKIP" = 1 ] || drop+=(-e '/#@etcdargs$/d')
   [ "$ETCD_PEER_DNS" = 1 ] || drop+=(-e '/#@peerdns$/d')
+  [ "$ETCD_PATCH" = 1 ] || drop+=(-e '/#@etcdpatch$/d')
   case "$tmpl" in
     node-sts.yaml.tmpl) inc=$(cat "$HERE/podspec.inc") ;;
     node-pod.yaml.tmpl) inc=$(sed 's/^    //' "$HERE/podspec.inc") ;;
@@ -261,6 +267,22 @@ cmd_node_up() {
   k -n "$NS" logs "$(pn "$r")" 2>/dev/null | grep -a 'WRAP:' | tr -d '\r' || true
 }
 
+# The etcd patch file of ETCD_PATCH=1. kubeadm applies each file of its patches folder to the
+# static pod manifest with the same target name, at init and at join. A JSON patch adds the three
+# arguments at the end of the etcd command. etcd takes the last value of an argument that is
+# given two times, so the two listen URLs replace the values that kubeadm wrote before them.
+etcd_patch_file() {
+  local r=$1
+  [ "$ETCD_PATCH" = 1 ] || return 0
+  say "replica $r: etcd patch file /etc/kubernetes/patches/etcd+json.json"
+  printf '%s\n' '[' \
+    '  {"op": "add", "path": "/spec/containers/0/command/-", "value": "--listen-client-urls=https://0.0.0.0:2379"},' \
+    '  {"op": "add", "path": "/spec/containers/0/command/-", "value": "--listen-peer-urls=https://0.0.0.0:2380"},' \
+    '  {"op": "add", "path": "/spec/containers/0/command/-", "value": "--peer-skip-client-san-verification=true"}' \
+    ']' | podi "$r" sh -c 'mkdir -p /etc/kubernetes/patches && cat >/etc/kubernetes/patches/etcd+json.json'
+  pod "$r" cat /etc/kubernetes/patches/etcd+json.json | tee "$LOG_DIR/etcd-patch-$r.json"
+}
+
 cmd_init() {
   local r=a rc=0
   mkdir -p "$SECRET_DIR"
@@ -275,6 +297,7 @@ cmd_init() {
   say "kubeadm config to /kind/kubeadm.conf (copy with no token in $LOG_DIR/kubeadm-init.conf)"
   render kubeadm-init.yaml.tmpl "$r" | podi "$r" sh -c 'umask 077; cat >/kind/kubeadm.conf'
   render kubeadm-init.yaml.tmpl "$r" | redact >"$LOG_DIR/kubeadm-init.conf"
+  etcd_patch_file "$r"
 
   say "kubeadm preflight with no ignore flag (output in $LOG_DIR/preflight-$r.txt)"
   pod "$r" kubeadm init phase preflight --config /kind/kubeadm.conf >"$LOG_DIR/preflight-$r.txt" 2>&1 || rc=$?
@@ -310,6 +333,7 @@ cmd_join() {
   say "replica $r: kubeadm join --control-plane (output in $LOG_DIR/kubeadm-join-$r.txt)"
   render kubeadm-join.yaml.tmpl "$r" | podi "$r" sh -c 'umask 077; cat >/kind/kubeadm-join.conf'
   render kubeadm-join.yaml.tmpl "$r" | redact >"$LOG_DIR/kubeadm-join-$r.conf"
+  etcd_patch_file "$r"
   stamp "$r-join-start"
   pod "$r" kubeadm join --config /kind/kubeadm-join.conf \
     ${IGNORE_PREFLIGHT:+--ignore-preflight-errors="$IGNORE_PREFLIGHT"} 2>&1 | redact >"$LOG_DIR/kubeadm-join-$r.txt" || rc=$?
@@ -672,7 +696,7 @@ cmd_peercheck() {
   out="$LOG_DIR/peercheck-$label.txt"
   {
     set +e
-    say "peer check $label at $(date -u +%FT%TZ): ETCD_PEER_DNS=$ETCD_PEER_DNS ETCD_SAN_SKIP=$ETCD_SAN_SKIP ETP=$ETP"
+    say "peer check $label at $(date -u +%FT%TZ): ETCD_PEER_DNS=$ETCD_PEER_DNS ETCD_SAN_SKIP=$ETCD_SAN_SKIP ETCD_PATCH=$ETCD_PATCH ETCD_LISTEN=$ETCD_LISTEN ETP=$ETP"
     k -n "$NS" get svc -o custom-columns=NAME:.metadata.name,TYPE:.spec.type,CLUSTER-IP:.spec.clusterIP,POLICY:.spec.externalTrafficPolicy,NOT-READY:.spec.publishNotReadyAddresses
     ips=$(k -n "$NS" get pods -l g4-role=control-plane -o jsonpath='{range .items[*]}{.status.podIP}{"\n"}{end}' | sort)
     echo "pod IPs: $(tr '\n' ' ' <<<"$ips")"
@@ -684,7 +708,11 @@ cmd_peercheck() {
       n=$(pod "$r" sh -c "getent ahostsv4 $PEER_NAME | awk '{print \$1}' | sort -u" 2>/dev/null)
       echo "DNS answer for $PEER_NAME: $(tr '\n' ' ' <<<"$n")"
       echo "etcd log lines with \"rejected connection on peer endpoint\": $(pod "$r" sh -c 'crictl logs "$(crictl ps --name etcd -q | head -1)" 2>&1 | grep -c "rejected connection on peer endpoint"')"
-      if [ "$ETCD_SAN_SKIP" != 1 ] && pod "$r" grep -q -- 'peer-skip-client-san-verification=true' /etc/kubernetes/manifests/etcd.yaml; then
+      echo "etcd sockets: $(pod "$r" sh -c "ss -ltnH | awk '\$4 ~ /:(2379|2380)\$/ {print \$4}' | sort | tr '\n' ' '")"
+      if [ "$ETCD_PATCH" = 1 ]; then
+        pod "$r" grep -q -- 'peer-skip-client-san-verification=true' /etc/kubernetes/manifests/etcd.yaml || { echo "FAIL: cp-$r has not the skip flag from the patch file"; fail=1; }
+        pod "$r" sh -c "ss -ltnH | grep -q -E '(0\\.0\\.0\\.0|\\*):2380 '" || { echo "FAIL: etcd of cp-$r does not listen on all addresses for peers"; fail=1; }
+      elif [ "$ETCD_SAN_SKIP" != 1 ] && pod "$r" grep -q -- 'peer-skip-client-san-verification=true' /etc/kubernetes/manifests/etcd.yaml; then
         echo "FAIL: cp-$r has the skip flag"
         fail=1
       fi
@@ -902,7 +930,7 @@ cmd_full() {
   stamp cluster-ready
   cmd_versions
   cmd_check 3-after-join
-  if [ "$ETCD_PEER_DNS" = 1 ] || [ "$ETCD_SAN_SKIP" != 1 ]; then cmd_peercheck after-join || true; fi
+  if [ "$ETCD_PEER_DNS" = 1 ] || [ "$ETCD_SAN_SKIP" != 1 ] || [ "$ETCD_PATCH" = 1 ]; then cmd_peercheck after-join || true; fi
   cmd_reach 6-after-join
   cmd_loop_start
   sleep 5

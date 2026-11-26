@@ -1,0 +1,102 @@
+# One pod that is an NVKE control plane node, and its Service. The base is lab/gate1/node-pod.yaml.tmpl.
+# The same template serves runc and Kata. run.sh fills the ${...} variables and removes the lines
+# with a "#@" tag when their option is off:
+#   #@runtimeclass   only with RUNTIME_CLASS (empty = the default runtime, runc)
+#   #@modules        only with LIB_MODULES=1 (not for Kata: the guest has a different kernel)
+#   #@kernelconfig   only with KERNEL_CONFIG (a kernel config file for the kubeadm preflight check)
+#   #@mtls           only with MODE=mtls (the SPIRE files of the node, from a Secret)
+# The template has no subPath mount, because Kata does not support it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${NAME}
+  namespace: ${NS}
+spec:
+  type: ClusterIP
+  selector: {app: ${NAME}}
+  # The pod is ready only when its API server is ready (see the probe). The controller must reach
+  # nvke-agent before that, to start kubeadm init. So the Service also routes to a pod that is not ready.
+  publishNotReadyAddresses: true
+  ports:
+    - {name: agent, port: 15005, targetPort: 15005}
+    - {name: api, port: 6443, targetPort: 6443}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${NAME}
+  namespace: ${NS}
+  labels: {app: ${NAME}}
+spec:
+  runtimeClassName: ${RUNTIME_CLASS} #@runtimeclass
+  # The hostname is the node name of the inner cluster. nico-sim sets the container hostname to it.
+  hostname: ${NAME}
+  # The node needs no token of the host cluster.
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  restartPolicy: Always
+  # See lab/gate1/node-pod.yaml.tmpl: the stop ends when systemd in the node ends, or with a kill.
+  terminationGracePeriodSeconds: ${GRACE}
+  containers:
+    - name: node
+      image: ${IMAGE}
+      imagePullPolicy: Never
+      # The wrapper prepares the volumes, the node state and the NVKE files, then starts the kind entrypoint.
+      command: ["/g1/wrapper.sh"]
+      tty: true
+      securityContext:
+        privileged: true
+      env:
+        # nico-sim sets fuse-overlayfs. Here /var is ext4 on a block volume, so overlayfs works.
+        - {name: KIND_EXPERIMENTAL_CONTAINERD_SNAPSHOTTER, value: "${SNAPSHOTTER}"}
+        # nico-sim sets this variable for the node container.
+        - {name: KUBECONFIG, value: /etc/kubernetes/admin.conf}
+        # The container has its own kernel (a Kata guest). The wrapper then sets guest values.
+        - {name: G1_GUEST, value: "1"} #@runtimeclass
+        - {name: G1_SKIP, value: "${G1_SKIP}"}
+        - {name: G1_STOP_TIMEOUT, value: "${STOP_TIMEOUT}"}
+        # 1 = nvke-agent with --disable-mtls. Only for the first run.
+        - {name: G1N_AGENT_PLAINTEXT, value: "${AGENT_PLAINTEXT}"}
+        - {name: G1N_SKIP_UNITS, value: "${SKIP_UNITS}"}
+        # Phase 1 step 1: the switches of section 6 of the wrapper.
+        - {name: P1_OVS_DATAPATH, value: "${P1_OVS_DATAPATH}"}
+        - {name: P1_OVS_NO_MODPROBE, value: "${P1_OVS_NO_MODPROBE}"}
+        - {name: P1_TUN, value: "${P1_TUN}"}
+        - {name: P1_KMOD_NOOP, value: "${P1_KMOD_NOOP}"}
+      # Requests are equal to limits. The Kata Rust runtime sizes the VM from the limits.
+      resources:
+        limits: {cpu: "${CPU}", memory: ${MEMORY}}
+      # The pod is ready when the API server of the inner cluster is ready.
+      readinessProbe:
+        httpGet: {path: /readyz, port: 6443, scheme: HTTPS}
+        periodSeconds: 2
+        failureThreshold: 1
+      volumeDevices:
+        - {name: var, devicePath: /dev/g1-var}
+        - {name: etcd, devicePath: /dev/g1-etcd}
+      volumeMounts:
+        - {name: run, mountPath: /run}
+        - {name: tmp, mountPath: /tmp}
+        - {name: wrapper, mountPath: /g1, readOnly: true}
+        - {name: modules, mountPath: /lib/modules, readOnly: true} #@modules
+        - {name: kernel-config, mountPath: /g1-kernel, readOnly: true} #@kernelconfig
+        - {name: spire, mountPath: /g1n-spire, readOnly: true} #@mtls
+  volumes:
+    - name: run
+      emptyDir: {medium: Memory}
+    - name: tmp
+      emptyDir: {medium: Memory}
+    - name: var
+      persistentVolumeClaim: {claimName: ${NAME}-var}
+    - name: etcd
+      persistentVolumeClaim: {claimName: ${NAME}-etcd}
+    - name: wrapper
+      configMap: {name: ${NAME}-wrapper, defaultMode: 0755}
+    - name: modules #@modules
+      hostPath: {path: /lib/modules} #@modules
+    - name: kernel-config #@kernelconfig
+      configMap: {name: ${NAME}-kernel-config} #@kernelconfig
+    # agent.conf (with the join token) and initial-trust-bundle.pem. NVKE gives a node the same
+    # two files in the bootstrap Secret of the machine.
+    - name: spire #@mtls
+      secret: {secretName: ${NAME}-spire} #@mtls

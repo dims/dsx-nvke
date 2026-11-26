@@ -1,0 +1,19 @@
+# A hand-made Cluster API Machine for the test of the ProvisionedMachine input. It has the
+# fields that NVKE sets (controller/internal/clients/shared/machine.go:185-205) and no
+# Cluster object, so the Cluster API controller does nothing with it.
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: Machine
+metadata:
+  name: __NODE__
+  namespace: __NS__
+  labels:
+    cluster.x-k8s.io/cluster-name: helper-test
+spec:
+  clusterName: helper-test
+  version: v1.36.4
+  bootstrap:
+    dataSecretName: __NODE__-bootstrap-data
+  infrastructureRef:
+    apiGroup: infrastructure.cluster.x-k8s.io
+    kind: ProvisionedMachine
+    name: __NODE__

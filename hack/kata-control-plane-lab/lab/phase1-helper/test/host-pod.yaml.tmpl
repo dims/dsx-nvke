@@ -1,0 +1,49 @@
+# One test host: the NVKE node image as a Kata pod, as the gate 4 pods
+# (~/notes/hosted/lab/gate4/podspec.inc), with no block volume and no Service.
+# test/run.sh replaces __NAME__ and __NS__. The label value is the hostname of the host
+# in the inventory. It is not the pod name on purpose.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: __NAME__
+  namespace: __NS__
+  labels:
+    nvke.lab/host: __HOST__
+spec:
+  runtimeClassName: kata-clh-runtime-rs-fix-direct
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  restartPolicy: Always
+  terminationGracePeriodSeconds: 20
+  containers:
+    - name: node
+      image: docker.io/library/nvke-node:bcc4376f-amd64
+      imagePullPolicy: Never
+      command: ["/g1/wrapper.sh"]
+      tty: true
+      securityContext:
+        privileged: true
+      env:
+        - {name: KIND_EXPERIMENTAL_CONTAINERD_SNAPSHOTTER, value: "overlayfs"}
+        - {name: G1_GUEST, value: "1"}
+        # The class with the exec fix needs no "init" cgroup.
+        - {name: G1_SKIP, value: "init-cgroup"}
+      # Requests are equal to limits. The Kata Rust runtime sizes the VM from the limits.
+      resources:
+        limits: {cpu: "2", memory: 4Gi}
+      volumeMounts:
+        - {name: run, mountPath: /run}
+        - {name: tmp, mountPath: /tmp}
+        - {name: wrapper, mountPath: /g1, readOnly: true}
+        # Stands for the /var volume: the state folder of the cloud-init shim stays through
+        # a container restart.
+        - {name: state, mountPath: /var/lib/nico-containers}
+  volumes:
+    - name: run
+      emptyDir: {medium: Memory}
+    - name: tmp
+      emptyDir: {medium: Memory}
+    - name: wrapper
+      configMap: {name: helper-test-wrapper, defaultMode: 0755}
+    - name: state
+      emptyDir: {}

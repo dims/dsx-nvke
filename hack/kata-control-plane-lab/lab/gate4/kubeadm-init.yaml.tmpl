@@ -5,6 +5,7 @@
 #   #@etcdsan      only with ETCD_SAN_SKIP=1 (etcd does not compare a peer certificate with the source address)
 #   #@etcdargs     the extraArgs line, only when one of the two is on
 #   #@peerdns      only with ETCD_PEER_DNS=1 (the peer certificate gets the DNS name of the headless Service)
+#   #@etcdpatch    only with ETCD_PATCH=1 (kubeadm reads patch files from /etc/kubernetes/patches)
 # The node address ${NODE_IP} is the LoadBalancer IP of the Service of the replica. The shared
 # endpoint ${IP_API} is the LoadBalancer IP of the Service that selects all replicas.
 apiVersion: kubeadm.k8s.io/v1beta4
@@ -34,6 +35,9 @@ networking:
 ---
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: InitConfiguration
+# Only with ETCD_PATCH=1: the patches folder that NVKE also sets for init. #@etcdpatch
+patches: #@etcdpatch
+  directory: /etc/kubernetes/patches #@etcdpatch
 bootstrapTokens:
   - token: ${TOKEN}
     ttl: 2h
