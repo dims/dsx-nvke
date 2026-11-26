@@ -4,7 +4,7 @@
 package server
 
 import (
-	"strings"
+	"github.com/dsx-ai-factory/nvke/controller/internal/db"
 )
 
 const (
@@ -15,22 +15,22 @@ const (
 
 // validateControlPlaneCapacityChange lets existing no-VIP clusters keep or reduce capacity,
 // but rejects growth beyond one control-plane node unless the dev override is enabled.
-func (s *clusterService) validateControlPlaneCapacityChange(controlPlaneVIP string, current, desired int) error {
-	if !s.allowControlPlaneWithoutVIP && strings.TrimSpace(controlPlaneVIP) == "" && desired > 1 && desired > current {
+func (s *clusterService) validateControlPlaneCapacityChange(cluster *db.Cluster, current, desired int) error {
+	if !s.allowControlPlaneWithoutVIP && !cluster.HasStableControlPlaneEndpoint() && desired > 1 && desired > current {
 		return newBadRequestErrorf("%s", controlPlaneVIPRequiredMessage)
 	}
 	return nil
 }
 
-func (s *clusterService) validateControlPlaneUpgrade(controlPlaneVIP string) error {
-	if !s.allowControlPlaneWithoutVIP && strings.TrimSpace(controlPlaneVIP) == "" {
+func (s *clusterService) validateControlPlaneUpgrade(cluster *db.Cluster) error {
+	if !s.allowControlPlaneWithoutVIP && !cluster.HasStableControlPlaneEndpoint() {
 		return newBadRequestErrorf("%s", controlPlaneVIPUpgradeMessage)
 	}
 	return nil
 }
 
-func (s *clusterService) validateControlPlaneRollout(controlPlaneVIP string, rolloutRequired bool) error {
-	if !s.allowControlPlaneWithoutVIP && strings.TrimSpace(controlPlaneVIP) == "" && rolloutRequired {
+func (s *clusterService) validateControlPlaneRollout(cluster *db.Cluster, rolloutRequired bool) error {
+	if !s.allowControlPlaneWithoutVIP && !cluster.HasStableControlPlaneEndpoint() && rolloutRequired {
 		return newBadRequestErrorf("%s", controlPlaneVIPRolloutMessage)
 	}
 	return nil

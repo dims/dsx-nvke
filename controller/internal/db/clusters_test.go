@@ -744,3 +744,33 @@ func TestCreateControlPlaneConfigRowIfChanged_CreatesRowWhenDiskStrategyChanges(
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), count)
 }
+
+func TestClusterHasStableControlPlaneEndpoint(t *testing.T) {
+	tests := []struct {
+		name    string
+		cluster db.Cluster
+		want    bool
+	}{
+		{
+			name:    "no endpoint field is set",
+			cluster: db.Cluster{},
+			want:    false,
+		},
+		{
+			name:    "a control-plane VIP is set",
+			cluster: db.Cluster{ControlPlaneVIP: "10.0.0.10"},
+			want:    true,
+		},
+		{
+			name:    "a blank control-plane VIP counts as unset",
+			cluster: db.Cluster{ControlPlaneVIP: "  "},
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.cluster.HasStableControlPlaneEndpoint())
+		})
+	}
+}
