@@ -1,0 +1,52 @@
+{
+  "name": "kata-cp1",
+  "controlPlaneKubernetesVersion": "1.36.4",
+  "cniPlugin": "ovn-kubernetes",
+  "cniVersion": "2.4.2",
+  "etcdEncrypted": false,
+  "network": {
+    "podCIDR": "10.113.0.0/16",
+    "serviceCIDR": "10.112.0.0/16"
+  },
+  "controlPlaneConfig": {
+    "desiredCount": 3,
+    "systemReservedMemory": "512Mi",
+    "infra": {
+      "machineTemplate": {
+        "apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha1",
+        "kind": "ProvisionedMachineTemplate",
+        "spec": {
+          "template": {
+            "spec": {}
+          }
+        }
+      }
+    }
+  },
+  "infra": {
+    "cluster": {
+      "apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha1",
+      "kind": "ProvisionedCluster",
+      "metadata": {
+        "name": "kata-cp1"
+      },
+      "spec": {
+        "hosts": [
+          {
+            "hostname": "kata-host-a",
+            "ipAddress": "172.30.255.221"
+          },
+          {
+            "hostname": "kata-host-b",
+            "ipAddress": "172.30.255.222"
+          },
+          {
+            "hostname": "kata-host-c",
+            "ipAddress": "172.30.255.223"
+          }
+        ]
+      }
+    }
+  },
+  "controlPlaneEndpoint": "10.112.0.50:6443"
+}

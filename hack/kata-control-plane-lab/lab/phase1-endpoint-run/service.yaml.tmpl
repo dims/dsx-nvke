@@ -1,0 +1,27 @@
+# One LoadBalancer Service for one node pod. Its address is the node address: the kubeadm advertise
+# address, the kubelet node IP, the etcd peer and client address, and the address that the lab client
+# (in the place of the NVKE controller) dials for nvke-agent. MetalLB gives the Service the address
+# that the annotation names. run.sh fills the ${...} variables.
+# There is no shared API Service: the cluster endpoint is the address of the first node.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${NAME}
+  namespace: ${NS}
+  annotations: {metallb.io/loadBalancerIPs: "${NODE_IP}"}
+spec:
+  type: LoadBalancer
+  # The controller calls the agent, and kubeadm calls the new etcd member and the new API server,
+  # before the pod is ready.
+  publishNotReadyAddresses: true
+  allocateLoadBalancerNodePorts: false
+  externalTrafficPolicy: ${ETP}
+  selector: {app: ${NAME}}
+  ports:
+    - {name: agent, port: 15005, targetPort: 15005, protocol: TCP}
+    - {name: api, port: 6443, targetPort: 6443, protocol: TCP}
+    - {name: etcd-client, port: 2379, targetPort: 2379, protocol: TCP}
+    - {name: etcd-peer, port: 2380, targetPort: 2380, protocol: TCP}
+    - {name: kubelet, port: 10250, targetPort: 10250, protocol: TCP}
+    # OVN between nodes: Geneve. The single node zone mode has no database connection between nodes.
+    - {name: geneve, port: 6081, targetPort: 6081, protocol: UDP}

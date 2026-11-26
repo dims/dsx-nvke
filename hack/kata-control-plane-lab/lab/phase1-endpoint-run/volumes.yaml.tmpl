@@ -1,0 +1,41 @@
+# Two raw block volumes for one replica: one for /var, one for /var/lib/etcd.
+# Each one is a loop device of the kind node, offered as a local PersistentVolume.
+# The class name has no StorageClass object and no provisioner. The claimRef names the claim
+# that the StatefulSet makes from its claim template (<template>-<statefulset>-0), so each
+# volume binds to the claim of its replica only. The bare Pod form uses the same claims.
+# run.sh fills the ${...} variables.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ${NS}-${NAME}-var
+spec:
+  capacity: {storage: ${VAR_SIZE}}
+  volumeMode: Block
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ${NS}-local-block
+  claimRef: {namespace: ${NS}, name: var-${NAME}-0}
+  local: {path: ${VAR_LOOP}}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - {key: kubernetes.io/hostname, operator: In, values: ["${KIND_NODE}"]}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ${NS}-${NAME}-etcd
+spec:
+  capacity: {storage: ${ETCD_SIZE}}
+  volumeMode: Block
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ${NS}-local-block
+  claimRef: {namespace: ${NS}, name: etcd-${NAME}-0}
+  local: {path: ${ETCD_LOOP}}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - {key: kubernetes.io/hostname, operator: In, values: ["${KIND_NODE}"]}
