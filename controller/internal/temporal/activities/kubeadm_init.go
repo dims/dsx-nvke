@@ -31,6 +31,20 @@ type KubeadmInitInput struct {
 	ClusterProvisioningConditionMessage string
 }
 
+// kubeadmControlPlaneEndpoint returns the address that kubeadm init records as
+// the cluster's controlPlaneEndpoint. An endpoint that NVKE does not manage
+// comes first, then the kube-vip VIP, then the IP of the initializing node.
+// Only the first two outlive that node, see db.Cluster.HasStableControlPlaneEndpoint.
+func kubeadmControlPlaneEndpoint(cluster db.Cluster, nodeIP string) string {
+	if endpoint := strings.TrimSpace(cluster.ControlPlaneEndpoint); endpoint != "" {
+		return endpoint
+	}
+	if vip := strings.TrimSpace(cluster.ControlPlaneVIP); vip != "" {
+		return vip
+	}
+	return nodeIP
+}
+
 func (a *Activities) KubeadmInit(ctx context.Context, input KubeadmInitInput) error {
 	conditionUpdateWrapper := ActivityStatusConditionUpdateWrapper[struct{}]{
 		Message:         input.ClusterProvisioningConditionMessage,
@@ -76,11 +90,7 @@ func (a *Activities) kubeadmInit(ctx context.Context, input KubeadmInitInput) er
 		return err
 	}
 
-	// Use the control plane VIP if set, otherwise fallback to the node IP
-	controlPlaneEndpoint := cluster.ControlPlaneVIP
-	if controlPlaneEndpoint == "" {
-		controlPlaneEndpoint = node.IP
-	}
+	controlPlaneEndpoint := kubeadmControlPlaneEndpoint(cluster, node.IP)
 
 	status, err := a.nodeAgentClient.GetKubeadmStatus(ctx, node)
 	if err != nil {

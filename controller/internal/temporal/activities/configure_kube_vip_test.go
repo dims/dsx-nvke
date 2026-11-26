@@ -292,3 +292,33 @@ func TestConfigureKubeVip_RPCFallbackBoundary(t *testing.T) {
 		})
 	}
 }
+
+// A cluster with a controlPlaneEndpoint has no VIP, so the kube-vip step must
+// not reach the node agent: no kube-vip call and no script.
+func TestConfigureKubeVip_NoCallForControlPlaneEndpoint(t *testing.T) {
+	t.Parallel()
+
+	nodeID, nodeSetID, nodePoolID, clusterID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	node := db.Node{ID: nodeID, ClusterID: clusterID, NodeSetID: nodeSetID, NodePoolID: nodePoolID, ControlPlane: true, IP: "10.0.0.20"}
+	nodePool := db.NodePool{ID: nodePoolID, ControlPlane: true, Capi: &db.CAPINodePoolProvider{}}
+	cluster := db.Cluster{ID: clusterID, ProviderType: db.ProviderTypeCAPI, ControlPlaneEndpoint: "lb.example.com:6443"}
+	mockDB := &testutil.MockDB{}
+	mockDB.On("GetNode", mock.Anything, nodeID).Return(node, nil).Twice()
+	mockDB.On("GetNodeSet", mock.Anything, nodeSetID).Return(db.NodeSet{ID: nodeSetID, NodePoolID: nodePoolID}, nil)
+	mockDB.On("GetNodePool", mock.Anything, nodePoolID).Return(nodePool, nil)
+	mockDB.On("GetCluster", mock.Anything, clusterID).Return(cluster, nil).Once()
+	fakeAgent := &agenttest.FakeClient{}
+
+	a := &Activities{db: mockDB, nodeAgentClient: fakeAgent}
+	env := (&testsuite.WorkflowTestSuite{}).NewTestActivityEnvironment()
+	env.RegisterActivity(a.configureKubeVip)
+	value, err := env.ExecuteActivity(a.configureKubeVip, ConfigureKubeVipInput{NodeID: nodeID, ConfigureSuperAdmin: true})
+	require.NoError(t, err)
+	var result ConfigureKubeVipResult
+	require.NoError(t, value.Get(&result))
+
+	require.Equal(t, ConfigureKubeVipResult{}, result)
+	require.Empty(t, fakeAgent.ReconcileKubeVipCalls)
+	require.Empty(t, fakeAgent.ExecuteScriptNames)
+	mockDB.AssertExpectations(t)
+}
