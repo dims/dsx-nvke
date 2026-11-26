@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Lets the NVKE controller use the kinds of this provider on its infra path,
+# for a lab. The controller chart does not grant these rights: it knows the
+# kinds of the provisioned provider only. Apply this file next to the chart,
+# the same way controller/hack/capd-provider/controller-rbac.yaml serves CAPD.
+#
+# The subject is the service account of a default chart install. Change it
+# when the release name or the namespace differs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nvke-controller-podvm
+rules:
+  - apiGroups:
+      - infrastructure.cluster.x-k8s.io
+    resources:
+      - podvmclusters
+      - podvmmachines
+      - podvmmachinetemplates
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - watch
+  - apiGroups:
+      - apiextensions.k8s.io
+    resources:
+      - customresourcedefinitions
+    resourceNames:
+      - podvmclusters.infrastructure.cluster.x-k8s.io
+      - podvmmachines.infrastructure.cluster.x-k8s.io
+      - podvmmachinetemplates.infrastructure.cluster.x-k8s.io
+    verbs:
+      - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nvke-controller-podvm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nvke-controller-podvm
+subjects:
+  - kind: ServiceAccount
+    name: nvke-controller
+    namespace: nvke-controller

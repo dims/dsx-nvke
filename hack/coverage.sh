@@ -51,6 +51,7 @@ COVERAGE_MODULES=(
 	agent
 	auth
 	cli
+	cluster-api-provider-podvm
 	cluster-api-provider-provisioned
 	controller
 	controller/api

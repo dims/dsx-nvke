@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# A PodVMCluster for the lab of the second test machine.
+#
+# The host cluster of that lab has the node network 172.28.0.0/16 on the
+# bridge br-node of each host node, and the NetworkAttachmentDefinition
+# "nodenet" in the namespace "d" puts a pod interface on it. The host nodes
+# use addresses of 172.28.0.0/24, so the pods get the block 172.28.1.0/24.
+#
+# With the NVKE controller, send the spec as infra.cluster of the cluster
+# request. The NVKE controller sets the name (the cluster name) and the
+# namespace (its management namespace) itself.
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: PodVMCluster
+metadata:
+  name: kata-cp1
+  namespace: nvke-system
+spec:
+  # The namespace must exist before the cluster request.
+  podNamespace: d
+  runtimeClassName: kata-clh-runtime-rs-fix-direct-ovs
+  networkAttachment:
+    name: nodenet
+    namespace: d
+  addressRange:
+    cidr: 172.28.1.0/24
+    prefixLength: 16
+  # The lab nodes have no zone label, so the provider publishes one failure
+  # domain for each host node.
+  failureDomainLabelKey: topology.kubernetes.io/zone
