@@ -71,13 +71,17 @@ It checks the spec and reports `status.initialization.provisioned`. The core
 Cluster API machine controller waits for that field.
 
 ```
-1. The namespace of spec.podNamespace exists.
-2. spec.addressRange is an IPv4 block inside the node network, with at least
+1. spec.addressRange is an IPv4 block inside the node network, with at least
    one usable address.
+2. The namespace of spec.podNamespace exists.
 3. The block does not overlap the block of an older PodVMCluster. The older
    cluster keeps its range, so a new cluster cannot take addresses from it.
 4. Publish status.failureDomains from the nodes of the host cluster.
 ```
+
+The provider does not use the first and the last address of the block, and it
+does not use the network address and the broadcast address of the node network.
+The block `172.28.1.0/24` gives the addresses `172.28.1.1` to `172.28.1.254`.
 
 A failure domain is one value of the node label `spec.failureDomainLabelKey`.
 When no node carries that label, each host node is one failure domain, from the
@@ -93,8 +97,8 @@ waits for the provider.
 ```
 1. Wait for the owner Machine and for its spec.bootstrap.dataSecretName.
 2. Take the lowest free address of the range. The set of used addresses is
-   status.address of every PodVMMachine of the cluster, read from the API
-   server at that moment. There is no allocation table.
+   status.address of every PodVMMachine, read from the API server at that
+   moment. There is no allocation table.
 3. Write status.addresses, status.address, status.hardwareAddress,
    status.podNamespace and status.podName. This happens before any object
    exists, and before spec.providerID.
@@ -108,6 +112,10 @@ waits for the provider.
 The controller reconciles one machine at a time, and the Deployment runs with
 leader election. Both are needed: step 2 is safe only when one writer gives out
 addresses.
+
+The machine controller keeps a cache of the pods that carry its owner labels
+only. It reads Secrets and volume claims directly from the API server and keeps
+no cache of them.
 
 ### The pod
 
@@ -155,7 +163,9 @@ The NVKE controller asks for a hard reboot with the annotation
 the annotation one time: it deletes the pod, and the rule above makes the pod
 again. It records the value in `status.lastRebootRequest`. The new virtual
 machine has a new boot ID, which is the signal that the NVKE controller waits
-for.
+for. The provider does not remove the annotation and does not write the
+annotation `nvke.nvidia.com/reboot-complete-timestamp`: the NVKE controller
+removes its request when it sees the new boot ID.
 
 ### Delete
 

@@ -11,16 +11,22 @@ import (
 	"os"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/selection"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	infrav1 "github.com/dsx-ai-factory/nvke/cluster-api-provider-podvm/api/v1alpha1"
+	"github.com/dsx-ai-factory/nvke/cluster-api-provider-podvm/controllers"
 )
 
 var version = "dev"
@@ -52,14 +58,36 @@ func main() {
 	utilruntime.Must(clusterv1.AddToScheme(scheme))
 	utilruntime.Must(infrav1.AddToScheme(scheme))
 
+	// The host cluster can hold many pods, and the provider needs only the
+	// ones it made. Every one of those carries the owner UID label.
+	ownedPods, err := labels.NewRequirement(infrav1.OwnerUIDLabel, selection.Exists, nil)
+	exitOnError(logger, err, "build the pod selector")
+
 	manager, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                 scheme,
+		Scheme: scheme,
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.Pod{}: {Label: labels.NewSelector().Add(*ownedPods)},
+			},
+		},
 		Metrics:                metricsserver.Options{BindAddress: metricsAddress},
 		HealthProbeBindAddress: probeAddress,
 		LeaderElection:         leaderElection,
 		LeaderElectionID:       "podvm.infrastructure.cluster.x-k8s.io",
 	})
 	exitOnError(logger, err, "create manager")
+
+	exitOnError(logger, controllers.NewClusterReconciler(
+		manager.GetClient(),
+		manager.GetAPIReader(),
+		logger.With("controller", "podvm-cluster"),
+	).SetupWithManager(manager), "register cluster controller")
+
+	exitOnError(logger, controllers.NewMachineReconciler(
+		manager.GetClient(),
+		manager.GetAPIReader(),
+		logger.With("controller", "podvm-machine"),
+	).SetupWithManager(manager), "register machine controller")
 
 	exitOnError(logger, manager.AddHealthzCheck("healthz", healthz.Ping), "register health check")
 	exitOnError(logger, manager.AddReadyzCheck("readyz", healthz.Ping), "register readiness check")
