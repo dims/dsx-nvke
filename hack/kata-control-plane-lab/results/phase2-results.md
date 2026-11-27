@@ -124,7 +124,7 @@ New in phase 2. The findings of phase 1 are in `results/phase1-results.md`, sect
 - Two clusters of the provider at one time, and the rule against overlapping address ranges in a cluster.
 - A pod that cannot be scheduled, a startup probe that does not pass in 20 minutes, a restart of the provider during a flow, a delete during provisioning.
 - The workstation, and a machine with no nested virtualization.
-- arm64. The lab on the arm machine is the next step after phase 2 (decision of 2026-11-26).
+- arm64. The arm machine of the lab has no KVM, so Kata cannot run there. Davanum decided on 2026-11-26: no arm64 now.
 - A real site: a production CNI for the secondary network, a real load balancer, a storage driver.
 
 ## 7. What comes after phase 2
