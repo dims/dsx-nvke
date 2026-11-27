@@ -215,6 +215,12 @@ while the old pod still runs.
 The provider deletes only objects that carry its owner labels with the UID of
 the machine. An object with the same name that belongs to something else stays.
 
+A run can start from a cache that still shows a machine that is gone, most often
+right after the finalizer was removed. Its write then gets "not found". The
+provider asks the API server for the machine, and when the machine does not
+exist the run ends with one line at the info level and no error. A "not found"
+answer for a machine that exists is still an error.
+
 ## How the Node gets its provider ID
 
 After the node agent answers, the machine controller reads the standard CAPI
