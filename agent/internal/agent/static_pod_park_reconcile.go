@@ -88,7 +88,8 @@ func (s *NodeAgentServer) staticPodParkRestores() []staticPodParkRestore {
 // renamed it back, and that survives the agent dying, systemd restarting it and
 // the node rebooting, so no separate state, marker or content hash is needed.
 // Only the two manifests the sequence parks can ever appear: kube-apiserver and
-// kube-vip.
+// kube-vip. A control plane endpoint gate the sequence closed is put right the
+// same way, from the owner its gate file names.
 //
 // The directory is also the whole of the discrimination. A graceful shutdown
 // parks into the parent directory instead, deliberately, and expects its
@@ -121,6 +122,15 @@ func (s *NodeAgentServer) ReconcileInterruptedStaticPodParks(ctx context.Context
 		slog.WarnContext(ctx, "restoring static-pod manifests parked by an interrupted etcd defragmentation",
 			"dir", defaultEtcdDefragParkDir, "manifests", parked)
 		failures = append(failures, s.restoreParkedStaticPodManifests(ctx, parked))
+	}
+
+	// A control plane endpoint gate the defragmentation closed is the same debt
+	// in another form, with the gate file as its durable record. It is settled
+	// here rather than with the kube-vip manifest because a node behind such a
+	// gate usually has no kube-vip, so nothing above would reach it. After the
+	// manifests, for the reason kube-vip goes last.
+	if err := s.openInterruptedControlPlaneEndpointGate(); err != nil {
+		failures = append(failures, err)
 	}
 
 	// After the restores, and not gating them. A record cannot be settled on a
@@ -165,6 +175,21 @@ func (s *NodeAgentServer) restoreParkedStaticPodManifests(ctx context.Context, p
 		slog.InfoContext(ctx, "restored a parked static-pod manifest", "manifest", candidate.manifestName)
 	}
 	return errors.Join(failures...)
+}
+
+// openInterruptedControlPlaneEndpointGate opens a gate that an interrupted
+// defragmentation closed and did not open again.
+//
+// It passes the defragmentation's park directory, so it is held to the rule
+// that keeps the manifest restores above safe: a gate closed by a graceful
+// shutdown, or handed to the caller by a defragmentation that gave up on the
+// member, names another owner and stays closed.
+func (s *NodeAgentServer) openInterruptedControlPlaneEndpointGate() error {
+	// Held for the reason restoreParkedStaticPodManifests holds it.
+	s.staticPodMutationMu.Lock()
+	defer s.staticPodMutationMu.Unlock()
+
+	return s.openControlPlaneEndpointGate(loggingOperationProgress{reason: "interrupted-operation-recovery"}, defaultEtcdDefragParkDir)
 }
 
 // interruptedStaticPodParkingOperations returns the IDs of operations in

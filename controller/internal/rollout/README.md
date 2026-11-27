@@ -40,7 +40,7 @@ you can act on.
 | `adapters/controller/` | Glue that makes CWE's `db.Cluster`/`db.Node` satisfy the interfaces here. `Loader` loads a cluster and its node inventory from postgres; the node adapters carry the agent endpoint. |
 | `nodeagent/` | The SPIFFE-mTLS `Dialer` the adapters, preflights, and operations use to reach each node's agent. |
 | `preflights/` | The registered default preflights: agent-reachable and kube-API-healthy (cluster scope), agent-ready and agent-version (node scope). |
-| `guards/kubevip/` | The kube-vip drain/restore node guard. |
+| `guards/kubevip/` | The kube-vip drain/restore node guard. On a node whose agent has a control plane endpoint gate, the same two agent RPCs also close and open the gate. |
 | `operations/dryrun/` | `DryRunOperation` — a reference operation that implements *every* optional capability but mutates nothing (`ApplyToNode` returns `OutcomeUnchanged`). It exercises every code path and is the model to copy when writing a new operation. |
 | `operations/etcd/` | The etcd-encryption operations — the framework's **first live consumer**. |
 | `operations/oidc/` | The OIDC-enable operation. |

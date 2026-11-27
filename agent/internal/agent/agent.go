@@ -245,6 +245,11 @@ type NodeAgentServer struct {
 	// uploadCertsMu serializes UpdateAndFetchKubeAdmJoinStrings, so that one call
 	// cannot rewrite the upload-certs config while kubeadm reads it for another.
 	uploadCertsMu sync.Mutex
+
+	// ControlPlaneEndpointGate is the health gate that takes this node out of a
+	// control-plane load balancer the node does not run. The zero value means
+	// there is no gate.
+	ControlPlaneEndpointGate ControlPlaneEndpointGate
 }
 
 // Real implementations
