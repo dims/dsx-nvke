@@ -1,0 +1,15 @@
+# PROPOSAL for pass rule 4. build.sh builds it only with WITH_P8=1. Not built in the preparation.
+# The node image for pods, form p8-nogate: the form p7 with ONE change: the readiness probe
+# program does not read the gate file. It only calls /readyz. The agent, its three flags and the
+# gate file are the same as in p7. So the agent closes its gate, the pod stays ready, the Service
+# sends new connections to the node, and the quiet window check of the agent must fail.
+# No file is written by hand into a guest: the difference is in the image.
+ARG P7=nvke-node-podvm:bcc4376f-p7
+FROM ${P7}
+RUN set -eu; \
+    sed -i '/^\[ -e ".*" \] && exit 1$/d' /usr/local/bin/podvm-endpoint-ready; \
+    if grep -q -F -e '[ -e ' /usr/local/bin/podvm-endpoint-ready; then echo "the probe program still reads a gate file"; exit 1; fi; \
+    grep -q '^exec /usr/bin/curl .*https://127.0.0.1:6443/readyz$' /usr/local/bin/podvm-endpoint-ready; \
+    echo "p8-nogate" >/usr/share/podvm/image-form; \
+    cat /usr/local/bin/podvm-endpoint-ready
+LABEL podvm.image-form="p8-nogate: p7 with a readiness probe that does not read the gate file (test of pass rule 4 only)"

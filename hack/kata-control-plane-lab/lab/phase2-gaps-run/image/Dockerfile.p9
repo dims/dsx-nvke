@@ -1,0 +1,29 @@
+# The node image for pods, form p9: the content of the form p6, with the agent binary that also has the fix of the encryption join defect
+# (phase 2 gaps, design note section 1). Four changes:
+#   1. the NVKE agent binary with the health gate (the file nvke-agent of the build context),
+#   2. the readiness probe program /usr/local/bin/podvm-endpoint-ready (mode 0755),
+#   3. a drop-in of the agent unit with three more flags,
+#   4. the config of the guest kernel with INET_DIAG_DESTROY as /boot/config-<release>
+#      (the system check of kubeadm reads it, and the guest kernel has no /proc/config.gz).
+# The gate file and the three flags are in ONE file of the build context: endpoint-gate.env.
+# gate-setup.sh makes the probe program and the drop-in from it.
+ARG P5=nvke-node-podvm:bcc4376f-p5
+FROM ${P5}
+ARG AGENT_SHA256
+ARG KERNEL_RELEASE=6.18.62
+COPY nvke-agent /usr/local/bin/nvke-agent
+COPY endpoint-gate.env podvm-endpoint-ready.in gate-setup.sh /usr/local/lib/podvm/
+COPY kernel-config /boot/config-${KERNEL_RELEASE}
+RUN set -eu; \
+    chmod 0755 /usr/local/bin/nvke-agent; \
+    echo "${AGENT_SHA256}  /usr/local/bin/nvke-agent" | sha256sum -c -; \
+    /usr/local/bin/nvke-agent --version 2>&1 | head -1; \
+    chmod 0644 "/boot/config-${KERNEL_RELEASE}" /usr/local/lib/podvm/endpoint-gate.env; \
+    grep -E '^CONFIG_(INET_DIAG|INET_TCP_DIAG|INET_DIAG_DESTROY|OPENVSWITCH)=y' "/boot/config-${KERNEL_RELEASE}" | tr '\n' ' '; echo; \
+    [ "$(grep -c -E '^CONFIG_(INET_DIAG|INET_TCP_DIAG|INET_DIAG_DESTROY|OPENVSWITCH)=y' "/boot/config-${KERNEL_RELEASE}")" = 4 ]; \
+    ss --help 2>&1 | grep -q -- '-K, --kill'; \
+    test -x /usr/bin/curl; \
+    sh /usr/local/lib/podvm/gate-setup.sh; \
+    rm /usr/local/lib/podvm/gate-setup.sh; \
+    mkdir -p /usr/share/podvm && echo "p9" >/usr/share/podvm/image-form
+LABEL podvm.image-form="p9: p6 with the agent that has the encryption join fix" podvm.agent-sha256="${AGENT_SHA256}"

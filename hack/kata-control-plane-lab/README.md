@@ -1,6 +1,6 @@
 # Kata control plane lab, phase 0, phase 1 and phase 2
 
-For a short summary for readers with no context, read `summary.md` first. On 2026-11-27 the changes for the two gaps of phase 2 have code and no cluster test result yet: `results/phase2-gaps-agent-gate.md` (a health gate in the node agent, branch `feat/agent-endpoint-health-gate` of this fork) and `results/phase2-gaps-capacity.md` (a capacity signal, branches `feat/capi-failure-domain-unavailable` and `feat/cluster-api-provider-podvm` of this fork).
+For a short summary for readers with no context, read `summary.md` first. On 2026-11-27 the two gaps of phase 2 got code on branches of this fork, and each change passes its test in the lab: a health gate in the node agent (`feat/agent-endpoint-health-gate`, `results/phase2-gaps-agent-gate.md`) and a capacity signal (`feat/capi-failure-domain-unavailable` and `feat/cluster-api-provider-podvm`, `results/phase2-gaps-capacity.md`). The tests found one more defect of the node agent: after etcd encryption is turned on for a cluster that exists, no new control plane node can join. Its fix is on the branch `fix/agent-encryption-join-config` (`results/phase2-encryption-join-fix.md`). The test results are in `results/phase2-results.md`, sections 1c and 1d, and in `lab/phase2-gaps-run/result.md`.
 
 Phase 1 is complete on 2026-11-26. Start with `results/phase1-results.md`.
 

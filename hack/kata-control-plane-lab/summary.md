@@ -8,7 +8,7 @@ NVKE can run each control plane node of a tenant cluster as one Kata pod on a se
 
 In the lab, one request to the NVKE API made a cluster with three control plane nodes as Kata pods. NVKE then ran its lifecycle flows on such a cluster, from a node replace to a Kubernetes upgrade, with the same node agent and the same workflows as on bare metal.
 
-The lab ran on two amd64 machines. The tests of phase 2 ran on a machine with nested virtualization, where each Kata virtual machine runs inside another virtual machine. The tests found two gaps, and the changes for them are in work on 2026-11-27 with no test result yet.
+The lab ran on two amd64 machines. The tests of phase 2 ran on a machine with nested virtualization, where each Kata virtual machine runs inside another virtual machine. The tests found two gaps and two defects of NVKE. All four have a change on a branch, and each change passes its test in the lab.
 
 ## What the lab tested and how it works
 
@@ -37,17 +37,26 @@ Phase 0 tested one node in a virtual machine of Kata Containers 4.4.0. In phase 
 | 1 | Shared endpoint during a replace of the first node pod | The endpoint answered 364 of 364 calls. | `results/phase1-results.md` |
 | 2 | Create and delete of a cluster through the API | One request made the cluster in 5 of 5 creates, with "provisioned" after 208 to 254 s. A delete left no object about 35 s after the request, 4 times. | `results/phase2-results.md` |
 | 2 | Loss of one pod, and replace of one node | A lost pod was back after 50 to 52 s with no operator step. A replace through the API took about 180 to 190 s. | `results/phase2-results.md` |
-| 2 | Rollout of three nodes to a new image | The rollout took 489 s with 0 failed joins. It needs the agent fix. | `results/phase2-results.md` |
+| 2 | Rollout of three nodes to a new image | The rollout took 489 s with 0 failed joins. It needs the first agent fix. | `results/phase2-results.md` |
 | 2 | etcd encryption, key rotation and forced certificate renewal | The flows took 5 min 40 s, 5 min 38 s and 9 min 49 s. In the renewal, 6 of 593 calls to the endpoint failed, and the worker node was NotReady two times (first gap). | `results/phase2-results.md` |
 | 2 | Upgrade from Kubernetes 1.35.5 to 1.36.4 | The upgrade passed with one stop of 1006 s (second gap). It takes about 630 s without the stop. | `results/phase2-results.md` |
 | 2 | One worker node as a pod | The node was Ready after 78 s, and five tests passed. A reboot took 31 minutes, and the lab did not test the NVKE setting that removes the wait. | `results/phase2-results.md` |
+| 2 | The same flows with the change for the first gap | In the forced renewal the endpoint answered 510 of 510 calls, and the worker stayed Ready. It answered 356 of 356 calls while encryption was turned on, and 968 of 968 and 1630 of 1630 in two rollouts. | `results/phase2-results.md`, section 1c |
+| 2 | A rollout with no room on one node of the host cluster, with the change for the second gap | NVKE moved the waiting node to another node of the host cluster 15 minutes after it made the node, and the rollout ended with no operator step after 1637 s. | `results/phase2-results.md`, section 1c |
+| 2 | A rollout after encryption was turned on | With the agent as it is, the first new node never joined. With the second agent fix, the three nodes joined at the first attempt, and a new Secret was stored encrypted. | `results/phase2-results.md`, section 1d |
 
 ## Findings in NVKE that apply with or without Kata pods
 
 - The node agent has a defect in the kubeadm step that uploads the certificates. The agent gives kubeadm a config for the step only on the first control plane node. Since kubeadm 1.33.12, 1.34.8, 1.35.5 and 1.36.1, kubeadm with no config takes the address of the default route interface. When the node address is on another interface, no new control plane node can join after the first node is gone (`results/phase2-results.md`).
+- The node agent has a second defect, in the flow that turns etcd encryption on for a cluster that exists. The agent rewrites the stored kubeadm configuration and replaces its whole API server section. In the lab 16 flags and 3 volumes were lost, and the one volume that the agent wrote names a file that no code makes. After that no new control plane node can join. A cluster with encryption from its creation does not have the defect, by the source and by a check with kubeadm (`results/phase2-encryption-join-fix.md`).
 - NVKE reports a cluster as provisioned when the pod network between its nodes does not work, because no step checks it (`results/phase1-results.md`).
 - NVKE cannot delete a cluster through its API alone when the cluster uses `cluster-api-provider-provisioned`, the provider for hosts that exist before the request (`results/phase1-results.md`).
 - The forced certificate renewal and the key rotation have no API request. The controller and the agent have no etcd backup or restore. The docs name a bundle `etcd-manager` for snapshots, its source is not in the repository, and the lab did not test it (`results/phase2-results.md`).
+
+## The two gaps and their changes
+
+- A guard for the shared endpoint. On bare metal, NVKE takes the address of the API servers away from a node before it stops etcd or the API server there, and a pod had no such guard. The change adds a health gate to the node agent. The agent writes a file, the readiness probe of the pod reads the file, and the pod leaves the Service. The agent then closes the open connections and checks that no new one arrives. With a probe that does not read the file, the check fails and the operation does not start.
+- A capacity signal. A rollout adds its extra node on the same node of the host cluster as the node that it replaces, and the extra node waited with no end when no room was left there. With the change, the provider reports the cause, and an existing rule of NVKE moves the node. After such a move two control plane nodes are on one node of the host cluster, and nothing moves a node back.
 
 ## What exists as code
 
@@ -56,26 +65,25 @@ The branches are on a public fork of the NVKE repository, `github.com/dims/dsx-n
 | Branch | Content | Source |
 |---|---|---|
 | `feat/cluster-api-provider-podvm` | The provider as a new module, with 81 test functions | `results/phase2-results.md`, `results/phase2-gaps-capacity.md` |
-| `fix/agent-upload-certs-config` | The fix of the node agent, in one commit that needs no other branch. All 10 join workflows of its cluster test completed at the first attempt | `results/phase2-agent-fix.md` |
+| `fix/agent-upload-certs-config` | The first fix of the node agent, in one commit that needs no other branch | `results/phase2-agent-fix.md` |
+| `fix/agent-encryption-join-config` | The second fix of the node agent, in one commit that needs no other branch | `results/phase2-encryption-join-fix.md` |
 | `feat/control-plane-endpoint` | The request field `controlPlaneEndpoint`, in three commits | `results/phase1-results.md` |
+| `feat/agent-endpoint-health-gate` | The health gate in the node agent | `results/phase2-gaps-agent-gate.md` |
+| `feat/capi-failure-domain-unavailable` | The capacity signal on the side of NVKE | `results/phase2-gaps-capacity.md` |
+| `docs/adr-control-plane-nodes-as-kata-pods` | A proposed architecture decision record for the repository | `tasks/todo.md` |
 | `test/kata-control-plane-lab` | The lab scripts, the results and the node image for pods | `tasks/todo.md` |
-| `feat/agent-endpoint-health-gate` and `feat/capi-failure-domain-unavailable` | The changes for the two gaps, in work on 2026-11-27 | `phase2-gaps-design.md` |
 
 A fix of the Kata agent from phase 0 is on the branch `lab/agent-kill-child-cgroups` of `github.com/dims/kata-containers` (`tasks/todo.md`).
 
 ## What is open and what the lab cannot show
 
-The changes for the two gaps have a design and no test result yet (`phase2-gaps-design.md`):
-
-- A guard for the shared endpoint. On bare metal, NVKE takes the address of the API servers away from a node before it stops etcd or the API server there, and a pod has no such guard. The design adds a health gate to the node agent, which is a file that the readiness probe of the pod reads.
-- A capacity signal. A rollout adds its extra node on the same node of the host cluster as the node that it replaces, and the extra node waits with no end when no room is left there. In the design, the provider reports the cause, and an existing rule of NVKE moves the node after 15 minutes.
-
 The following parts do not exist yet (`results/phase2-results.md`):
 
 - The provider as a product path of NVKE. The lab used the `infra` path, which the NVKE docs do not name as a product path.
-- A release process for the node image and for the Kata kernel. The stock Kata kernel has no Open vSwitch, so the lab built a kernel with 8 added options by hand.
+- A release process for the node image and for the Kata kernel. The stock Kata kernel has no Open vSwitch and cannot close a connection from outside, so the lab built a kernel with 11 added options by hand.
 - A production storage driver, network and load balancer in the place of the lab parts.
 - A reaction to the loss of a node of the host cluster. The control plane fails with its host cluster.
 - Workers on bare metal in the same cluster. A cluster has exactly one provider today.
+- A repair for a cluster that already lost its API server settings when encryption was turned on. The second agent fix stops the loss and does not bring the settings back.
 
-The lab cannot show the behavior on a production site, in CI, on arm64, or without nested virtualization for the final design. It also cannot show etcd under a production load, or failure cases such as the loss of a node of the host cluster.
+The lab cannot show the behavior on a production site, in CI, on arm64, or without nested virtualization for the final design. It also cannot show etcd under a production load, or failure cases such as the loss of a node of the host cluster. Most tests of the changes ran one time.

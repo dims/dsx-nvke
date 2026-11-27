@@ -1,0 +1,965 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: podvm-system
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  labels:
+    cluster.x-k8s.io/provider: infrastructure-podvm
+    cluster.x-k8s.io/v1beta2: v1alpha1
+  name: podvmclusters.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: PodVMCluster
+    listKind: PodVMClusterList
+    plural: podvmclusters
+    shortNames:
+    - pvmc
+    singular: podvmcluster
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.initialization.provisioned
+      name: Provisioned
+      type: boolean
+    - jsonPath: .spec.podNamespace
+      name: PodNamespace
+      type: string
+    - jsonPath: .spec.addressRange.cidr
+      name: Addresses
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: PodVMCluster is the Schema for the podvmclusters API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              PodVMClusterSpec defines the desired state of PodVMCluster.
+
+              The spec holds no control plane endpoint. The NVKE controller takes the
+              endpoint from the controlPlaneEndpoint field of its own cluster API and
+              ignores an endpoint on the infrastructure cluster.
+            properties:
+              addressRange:
+                description: |-
+                  AddressRange is the block of fixed addresses for the pods of this
+                  cluster. It must not overlap the block of another PodVMCluster.
+                properties:
+                  cidr:
+                    description: |-
+                      CIDR is the block of IPv4 addresses, for example 172.28.1.0/24. The
+                      provider gives each machine the lowest free address of the block. It
+                      does not use the first and the last address of the block, and it does
+                      not use the network address and the broadcast address of the node
+                      network.
+                    maxLength: 18
+                    minLength: 9
+                    type: string
+                  prefixLength:
+                    description: |-
+                      PrefixLength is the prefix length of the node network. The provider
+                      writes it with each address, for example 172.28.1.21/16. The node
+                      network must contain the block of cidr, so the prefix length cannot be
+                      larger than the prefix length of cidr.
+                    format: int32
+                    maximum: 32
+                    minimum: 1
+                    type: integer
+                required:
+                - cidr
+                - prefixLength
+                type: object
+                x-kubernetes-validations:
+                - message: addressRange is immutable
+                  rule: self == oldSelf
+              failureDomainLabelKey:
+                default: topology.kubernetes.io/zone
+                description: |-
+                  FailureDomainLabelKey is the node label of the host cluster that names
+                  a failure domain. The provider publishes one failure domain for each
+                  value of this label. When no node carries the label, the provider
+                  publishes one failure domain for each host node, from the label
+                  kubernetes.io/hostname.
+                maxLength: 317
+                type: string
+              networkAttachment:
+                description: |-
+                  NetworkAttachment names the NetworkAttachmentDefinition of the node
+                  network. Each pod gets one more interface on that network, with a fixed
+                  address and a fixed hardware address.
+                properties:
+                  name:
+                    description: Name is the name of the NetworkAttachmentDefinition.
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace is the namespace of the NetworkAttachmentDefinition. When it is
+                      empty, the provider uses spec.podNamespace.
+                    maxLength: 63
+                    type: string
+                required:
+                - name
+                type: object
+              podNamespace:
+                description: |-
+                  PodNamespace is the namespace of the host cluster in which the provider
+                  makes the pods, the volume claims and the copies of the bootstrap
+                  Secrets. The namespace must exist. The provider does not make it and
+                  does not delete it.
+                maxLength: 63
+                minLength: 1
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+                x-kubernetes-validations:
+                - message: podNamespace is immutable
+                  rule: self == oldSelf
+              runtimeClassName:
+                description: |-
+                  RuntimeClassName is the RuntimeClass of each pod. It must name a Kata
+                  runtime whose guest kernel has what a Kubernetes node needs.
+                maxLength: 253
+                minLength: 1
+                type: string
+            required:
+            - addressRange
+            - networkAttachment
+            - podNamespace
+            - runtimeClassName
+            type: object
+          status:
+            description: PodVMClusterStatus defines the observed state of PodVMCluster.
+            properties:
+              conditions:
+                description: Conditions describes the current state.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              failureDomains:
+                description: |-
+                  FailureDomains lists the failure domains of the host cluster. Each one
+                  can hold a control plane machine. Cluster API copies the list to the
+                  Cluster, and the NVKE controller picks one domain for each control plane
+                  machine.
+                items:
+                  description: |-
+                    FailureDomain is the Schema for Cluster API failure domains.
+                    It allows controllers to understand how many failure domains a cluster can optionally span across.
+                  properties:
+                    attributes:
+                      additionalProperties:
+                        type: string
+                      description: attributes is a free form map of attributes an
+                        infrastructure provider might use or require.
+                      type: object
+                    controlPlane:
+                      description: controlPlane determines if this failure domain
+                        is suitable for use by control plane machines.
+                      type: boolean
+                    name:
+                      description: name is the name of the failure domain.
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              initialization:
+                description: Initialization reports the state that the Cluster API
+                  contract requires.
+                minProperties: 1
+                properties:
+                  provisioned:
+                    description: |-
+                      Provisioned is true when the spec is valid. The core Cluster API machine
+                      controller waits for this field before it acts on any machine of the
+                      cluster.
+                    type: boolean
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  labels:
+    cluster.x-k8s.io/provider: infrastructure-podvm
+    cluster.x-k8s.io/v1beta2: v1alpha1
+  name: podvmmachines.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: PodVMMachine
+    listKind: PodVMMachineList
+    plural: podvmmachines
+    shortNames:
+    - pvmm
+    singular: podvmmachine
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.initialization.provisioned
+      name: Provisioned
+      type: boolean
+    - jsonPath: .status.podName
+      name: Pod
+      type: string
+    - jsonPath: .status.address
+      name: Address
+      type: string
+    - jsonPath: .spec.providerID
+      name: ProviderID
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: PodVMMachine is the Schema for the podvmmachines API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: PodVMMachineSpec defines the desired state of PodVMMachine.
+            properties:
+              image:
+                description: |-
+                  Image is the node image for pods. The entry point of the image runs:
+                  the provider sets no command and no arguments. The image carries the
+                  Kubernetes version of the node, so a new version is a new image.
+                maxLength: 1024
+                minLength: 1
+                type: string
+              imagePullPolicy:
+                description: |-
+                  ImagePullPolicy is the pull policy of the node image. When it is empty,
+                  the host cluster applies its default.
+                enum:
+                - Always
+                - IfNotPresent
+                - Never
+                type: string
+              providerID:
+                description: |-
+                  ProviderID names the pod of this machine, in the form
+                  podvm://<pod-namespace>/<pod-name>. The provider sets it once, when the
+                  node agent in the pod answers for the first time. The provider never
+                  changes it and never clears it: a new pod for the same machine has the
+                  same name.
+                maxLength: 512
+                minLength: 1
+                type: string
+              resources:
+                description: Resources is the size of the virtual machine.
+                properties:
+                  cpu:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: |-
+                      CPU is the CPU count of the virtual machine. The provider writes it as
+                      the limit and as the request of the container, because the Kata runtime
+                      sizes the virtual machine from the limits.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  memory:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: |-
+                      Memory is the memory of the virtual machine. The provider writes it as
+                      the limit and as the request of the container.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                required:
+                - cpu
+                - memory
+                type: object
+              volumes:
+                description: Volumes describes the two block volumes of the pod.
+                properties:
+                  etcd:
+                    description: Etcd is the volume that the node image mounts at
+                      /var/lib/etcd.
+                    properties:
+                      size:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: Size is the size that the volume claim requests.
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      storageClassName:
+                        description: |-
+                          StorageClassName is the storage class of the volume claim. When it is
+                          empty, the claim names no class and the host cluster uses its default
+                          class.
+                        maxLength: 253
+                        type: string
+                    required:
+                    - size
+                    type: object
+                  var:
+                    description: |-
+                      Var is the volume that the node image mounts at /var. It keeps the
+                      state of the node through a new pod, with the SPIRE agent data.
+                    properties:
+                      size:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        description: Size is the size that the volume claim requests.
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      storageClassName:
+                        description: |-
+                          StorageClassName is the storage class of the volume claim. When it is
+                          empty, the claim names no class and the host cluster uses its default
+                          class.
+                        maxLength: 253
+                        type: string
+                    required:
+                    - size
+                    type: object
+                required:
+                - etcd
+                - var
+                type: object
+            required:
+            - image
+            - resources
+            - volumes
+            type: object
+            x-kubernetes-validations:
+            - message: providerID is immutable once set
+              rule: '!has(oldSelf.providerID) || (has(self.providerID) && self.providerID
+                == oldSelf.providerID)'
+          status:
+            description: PodVMMachineStatus defines the observed state of PodVMMachine.
+            properties:
+              address:
+                description: |-
+                  Address is the fixed address that this machine holds, with no prefix
+                  length. This field is the record of the allocation: the provider
+                  derives the set of used addresses from this field of every machine of
+                  the cluster. The address is free again when the PodVMMachine is gone.
+                type: string
+              addresses:
+                description: |-
+                  Addresses holds the fixed address of the machine as its internal IP
+                  address. Cluster API copies it to the Machine, and the NVKE controller
+                  reads it to find the node agent and calls the agent at once. So the
+                  provider writes it when the node agent in the pod answers, just before
+                  the provider ID, and never clears it. The address itself is in
+                  status.address from the allocation on.
+                items:
+                  description: MachineAddress contains information for the node's
+                    address.
+                  properties:
+                    address:
+                      description: address is the machine address.
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                    type:
+                      description: type is the machine address type, one of Hostname,
+                        ExternalIP, InternalIP, ExternalDNS or InternalDNS.
+                      enum:
+                      - Hostname
+                      - ExternalIP
+                      - InternalIP
+                      - ExternalDNS
+                      - InternalDNS
+                      type: string
+                  required:
+                  - address
+                  - type
+                  type: object
+                type: array
+              conditions:
+                description: Conditions describes the current state.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              hardwareAddress:
+                description: |-
+                  HardwareAddress is the fixed hardware address of the pod interface on
+                  the node network. The provider derives it from the address.
+                type: string
+              initialization:
+                description: Initialization reports the state that the Cluster API
+                  contract requires.
+                minProperties: 1
+                properties:
+                  provisioned:
+                    description: |-
+                      Provisioned is true when the node agent in the pod of the machine
+                      answered for the first time. The provider never clears it: a pod that
+                      is lost later is made again for the same machine.
+                    type: boolean
+                type: object
+              lastRebootRequest:
+                description: |-
+                  LastRebootRequest is the value of the reboot annotation of the owner
+                  Machine that the provider answered last. The provider answers a new
+                  value one time: it deletes the pod, and then makes the pod again.
+                type: string
+              podName:
+                description: PodName is the name of the pod. It is the name of the
+                  owner Machine.
+                type: string
+              podNamespace:
+                description: |-
+                  PodNamespace is the namespace of the pod, of the volume claims and of
+                  the copy of the bootstrap Secret. The provider records it before it
+                  makes the first of them, so a delete finds them without the
+                  PodVMCluster.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  labels:
+    cluster.x-k8s.io/provider: infrastructure-podvm
+    cluster.x-k8s.io/v1beta2: v1alpha1
+  name: podvmmachinetemplates.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: PodVMMachineTemplate
+    listKind: PodVMMachineTemplateList
+    plural: podvmmachinetemplates
+    shortNames:
+    - pvmmt
+    singular: podvmmachinetemplate
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          PodVMMachineTemplate is the Schema for the podvmmachinetemplates API.
+
+          A caller sends this kind as the infra.machineTemplate of the cluster control
+          plane configuration or of a node pool. The template carries the node image,
+          the size of the virtual machine and the two volumes. The address of each
+          machine comes from the PodVMCluster.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: PodVMMachineTemplateSpec defines the desired state of PodVMMachineTemplate.
+            properties:
+              template:
+                description: Template is the machine to render.
+                properties:
+                  metadata:
+                    description: |-
+                      ObjectMeta is copied to the rendered machine. Only labels and annotations
+                      are used.
+                    type: object
+                  spec:
+                    description: Spec is the spec of the rendered PodVMMachine.
+                    properties:
+                      image:
+                        description: |-
+                          Image is the node image for pods. The entry point of the image runs:
+                          the provider sets no command and no arguments. The image carries the
+                          Kubernetes version of the node, so a new version is a new image.
+                        maxLength: 1024
+                        minLength: 1
+                        type: string
+                      imagePullPolicy:
+                        description: |-
+                          ImagePullPolicy is the pull policy of the node image. When it is empty,
+                          the host cluster applies its default.
+                        enum:
+                        - Always
+                        - IfNotPresent
+                        - Never
+                        type: string
+                      providerID:
+                        description: |-
+                          ProviderID names the pod of this machine, in the form
+                          podvm://<pod-namespace>/<pod-name>. The provider sets it once, when the
+                          node agent in the pod answers for the first time. The provider never
+                          changes it and never clears it: a new pod for the same machine has the
+                          same name.
+                        maxLength: 512
+                        minLength: 1
+                        type: string
+                      resources:
+                        description: Resources is the size of the virtual machine.
+                        properties:
+                          cpu:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            description: |-
+                              CPU is the CPU count of the virtual machine. The provider writes it as
+                              the limit and as the request of the container, because the Kata runtime
+                              sizes the virtual machine from the limits.
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          memory:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            description: |-
+                              Memory is the memory of the virtual machine. The provider writes it as
+                              the limit and as the request of the container.
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                        required:
+                        - cpu
+                        - memory
+                        type: object
+                      volumes:
+                        description: Volumes describes the two block volumes of the
+                          pod.
+                        properties:
+                          etcd:
+                            description: Etcd is the volume that the node image mounts
+                              at /var/lib/etcd.
+                            properties:
+                              size:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                description: Size is the size that the volume claim
+                                  requests.
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              storageClassName:
+                                description: |-
+                                  StorageClassName is the storage class of the volume claim. When it is
+                                  empty, the claim names no class and the host cluster uses its default
+                                  class.
+                                maxLength: 253
+                                type: string
+                            required:
+                            - size
+                            type: object
+                          var:
+                            description: |-
+                              Var is the volume that the node image mounts at /var. It keeps the
+                              state of the node through a new pod, with the SPIRE agent data.
+                            properties:
+                              size:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                description: Size is the size that the volume claim
+                                  requests.
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              storageClassName:
+                                description: |-
+                                  StorageClassName is the storage class of the volume claim. When it is
+                                  empty, the claim names no class and the host cluster uses its default
+                                  class.
+                                maxLength: 253
+                                type: string
+                            required:
+                            - size
+                            type: object
+                        required:
+                        - etcd
+                        - var
+                        type: object
+                    required:
+                    - image
+                    - resources
+                    - volumes
+                    type: object
+                    x-kubernetes-validations:
+                    - message: providerID is immutable once set
+                      rule: '!has(oldSelf.providerID) || (has(self.providerID) &&
+                        self.providerID == oldSelf.providerID)'
+                required:
+                - spec
+                type: object
+            required:
+            - template
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: podvm-controller-manager
+  namespace: podvm-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: podvm-leader-election
+  namespace: podvm-system
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: podvm-controller-manager
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
+  - clusters
+  - machines
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - podvmclusters
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - podvmclusters/status
+  - podvmmachines/status
+  verbs:
+  - patch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - podvmmachines
+  verbs:
+  - get
+  - list
+  - patch
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: podvm-leader-election
+  namespace: podvm-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: podvm-leader-election
+subjects:
+- kind: ServiceAccount
+  name: podvm-controller-manager
+  namespace: podvm-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: podvm-controller-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: podvm-controller-manager
+subjects:
+- kind: ServiceAccount
+  name: podvm-controller-manager
+  namespace: podvm-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-api-provider-podvm
+    cluster.x-k8s.io/provider: infrastructure-podvm
+  name: podvm-controller-manager
+  namespace: podvm-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cluster-api-provider-podvm
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: cluster-api-provider-podvm
+        cluster.x-k8s.io/provider: infrastructure-podvm
+    spec:
+      containers:
+      - args:
+        - --leader-elect
+        image: docker.io/library/cluster-api-provider-podvm:d2880014
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: probes
+        name: manager
+        ports:
+        - containerPort: 8080
+          name: metrics
+        - containerPort: 8081
+          name: probes
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: probes
+        resources:
+          limits:
+            cpu: 500m
+            memory: 256Mi
+          requests:
+            cpu: 20m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      securityContext:
+        runAsNonRoot: true
+      serviceAccountName: podvm-controller-manager
+      terminationGracePeriodSeconds: 10

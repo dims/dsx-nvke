@@ -1,0 +1,8 @@
+#!/bin/sh
+# Readiness probe of the pod of a control plane Machine. The Service of the shared address sends
+# traffic only to a ready pod, so this program is the health check of the load balancer.
+# It passes when the gate file of the NVKE agent does not exist and /readyz of the local API
+# server answers within 2 s with a code below 400 (/readyz gives 200 or 500).
+# One process: the shell becomes curl (exec). A kill at the probe timeout leaves no process.
+[ -e "@GATE_FILE@" ] && exit 1
+exec /usr/bin/curl --silent --fail --insecure --noproxy '*' --max-time 2 --output /dev/null https://127.0.0.1:6443/readyz

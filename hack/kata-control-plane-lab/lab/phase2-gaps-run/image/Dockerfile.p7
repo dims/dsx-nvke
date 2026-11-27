@@ -1,0 +1,6 @@
+# The node image for pods, form p7: the form p6 with another marker (a label and one small file).
+# It is the second image name for the rollout tests. Nothing else differs.
+ARG P6=nvke-node-podvm:bcc4376f-p6
+FROM ${P6}
+RUN echo "p7" >/usr/share/podvm/image-form
+LABEL podvm.image-form="p7: p6 with another marker"
