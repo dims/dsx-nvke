@@ -225,3 +225,91 @@ func TestReconcileStuckPendingNodes_NoOps(t *testing.T) {
 		assert.False(t, acted)
 	})
 }
+
+// A template-backed provider's placement failure is read from the Machine alone:
+// Cluster API mirrors the infrastructure machine's Ready condition into the
+// Machine's InfrastructureReady condition, and its reason is the whole signal.
+func TestReconcileStuckPendingNodes_TemplateProviderReason(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		reason    string
+		wantActed bool
+	}{
+		{"failure domain out of capacity re-places the node", "FailureDomainUnavailable", true},
+		{"unschedulable without a requested domain leaves the node", "PodUnschedulable", false},
+		{"provider still creating the machine leaves the node", "WaitingForPod", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			clusterID := uuid.New()
+			cluster := db.Cluster{
+				ID: clusterID, Name: "test-cluster", ProviderType: db.ProviderTypeCAPI, ControlPlaneVIP: "10.0.0.1",
+				ControlPlaneConfig: db.ControlPlaneConfig{DesiredCount: 3},
+			}
+			// A template-backed node carries no provider payload, so nothing but
+			// its Pending condition says that no infrastructure is allocated.
+			stuck := stuckPendingNode(clusterID, "cp-stuck", 2*time.Hour)
+			require.Nil(t, stuck.Nico)
+			require.Nil(t, stuck.LaunchLayer)
+			healthyB := healthyCPNode(clusterID, "cp-b", time.Now().Add(-5*time.Hour))
+			healthyB.FailureDomain = "B"
+
+			scheme := runtime.NewScheme()
+			require.NoError(t, clusterv1.AddToScheme(scheme))
+			k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&clusterv1.Machine{
+				ObjectMeta: metav1.ObjectMeta{Name: stuck.Name, Namespace: config.Config{}.ManagementNamespaceOrDefault(), Generation: 1},
+				Spec:       clusterv1.MachineSpec{FailureDomain: stuck.FailureDomain},
+				Status: clusterv1.MachineStatus{Conditions: []metav1.Condition{{
+					Type:               clusterv1.MachineInfrastructureReadyCondition,
+					Status:             metav1.ConditionFalse,
+					Reason:             tt.reason,
+					Message:            "Pod pods/cp-stuck cannot be scheduled",
+					ObservedGeneration: 1,
+					LastTransitionTime: metav1.Now(),
+				}}},
+			}).Build()
+
+			mockTx := &testutil.MockTx{}
+			mockTx.On("GetCluster", mock.Anything, clusterID).Return(cluster, nil)
+			var marked db.Cluster
+			mockTx.On("UpdateCluster", mock.Anything, mock.MatchedBy(func(c *db.Cluster) bool {
+				marked = *c
+				return true
+			})).Return(cluster, nil)
+			mockTx.On("GetNode", mock.Anything, stuck.ID).Return(stuck, nil)
+			mockTx.On("GetClusterForUpdate", mock.Anything, clusterID).Return(cluster, nil)
+			mockTx.On("GetNodeForUpdate", mock.Anything, stuck.ID).Return(stuck, nil)
+			var written db.Node
+			mockTx.On("UpdateNode", mock.Anything, mock.MatchedBy(func(n *db.Node) bool {
+				written = *n
+				return true
+			})).Return(stuck, nil)
+
+			machines, err := clients.GetMachineMaterialization(cluster)
+			require.NoError(t, err)
+			r := &reconciler{db: mockTx, logger: slog.Default(), k8sClient: k8sClient}
+			cp := &controlPlane{
+				nodes:                     []db.Node{stuck, healthyB},
+				clusterControlPlaneConfig: cluster.ControlPlaneConfig,
+				failureDomains:            &failureDomains{eligible: []string{"A", "B"}},
+			}
+
+			acted, err := r.reconcileStuckPendingNodes(context.Background(), cluster, cp, machines)
+			require.NoError(t, err)
+
+			assert.Equal(t, tt.wantActed, acted)
+			if !tt.wantActed {
+				mockTx.AssertNotCalled(t, "UpdateNode", mock.Anything, mock.Anything)
+				mockTx.AssertNotCalled(t, "UpdateCluster", mock.Anything, mock.Anything)
+				return
+			}
+			assert.Equal(t, stuck.ID, written.ID)
+			assert.True(t, nodes.IsDeleteRequested(written))
+			assert.Contains(t, marked.Conditions.UnplaceableFailureDomains, "A")
+		})
+	}
+}
