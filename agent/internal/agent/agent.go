@@ -17,6 +17,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,7 +48,7 @@ import (
 
 var (
 	KubeConfig = "/etc/kubernetes/admin.conf"
-	// kubeadmInitConfigPath is the InitConfiguration kubeadm init ran with; upload-certs must use the same one.
+	// kubeadmInitConfigPath is where the agent writes the config that kubeadm init runs with.
 	kubeadmInitConfigPath = "/tmp/kubeadm-init-config.yaml"
 	//go:embed rescan_mlx5.sh
 	mlx5RescanScript string
@@ -87,6 +88,12 @@ const (
 
 	kubeSystemNamespace  = "kube-system"
 	kubeadmConfigMapName = "kubeadm-config"
+
+	// kubeAPIServerAdvertiseEndpointAnnotation is set by kubeadm on the API server static pod of every
+	// control plane node. Its value is the advertise address and the bind port of that API server, as host:port.
+	kubeAPIServerAdvertiseEndpointAnnotation = "kubeadm.kubernetes.io/kube-apiserver.advertise-address.endpoint"
+	// uploadCertsConfigPath is the kubeadm config that the agent writes for the upload-certs phase.
+	uploadCertsConfigPath = NVKEDir + "/kubeadm-upload-certs-config.yaml"
 
 	kubeadmCmdInit  = "init"
 	kubeadmCmdJoin  = "join"
@@ -234,6 +241,10 @@ type NodeAgentServer struct {
 	// etcdCallTimeout bounds a single etcd API call, so an unreachable member
 	// cannot block a call indefinitely. Zero means the production default.
 	etcdCallTimeout time.Duration
+
+	// uploadCertsMu serializes UpdateAndFetchKubeAdmJoinStrings, so that one call
+	// cannot rewrite the upload-certs config while kubeadm reads it for another.
+	uploadCertsMu sync.Mutex
 }
 
 // Real implementations
@@ -879,7 +890,7 @@ func (s *NodeAgentServer) processKubeadmInit(args []string, req *pb.KubeadmInitR
 			args = append(args, "--ignore-preflight-errors=SystemVerification")
 		}
 	} else if err := os.Remove(s.initConfigFile()); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		// A config left by an earlier custom init would otherwise be handed to upload-certs.
+		// A config left by an earlier custom init does not describe this cluster.
 		ns.Status = ErrorStatus
 		ns.ErrorMessage = "failed to remove stale init config file: " + err.Error()
 		return
@@ -1562,7 +1573,16 @@ func (s *NodeAgentServer) UpdateAndFetchKubeAdmJoinStrings(
 		)
 	}
 
-	newCert, err := s.uploadControlPlaneCerts()
+	s.uploadCertsMu.Lock()
+	defer s.uploadCertsMu.Unlock()
+
+	configPath, err := s.writeUploadCertsConfig()
+	if err != nil {
+		slog.Error("failed to write the kubeadm config for upload-certs", "err", err)
+		return nil, status.Errorf(codes.FailedPrecondition, "kubeadm config for upload-certs: %v", err)
+	}
+
+	newCert, err := s.uploadControlPlaneCerts(configPath)
 	if err != nil {
 		slog.Error("failed to upload new controlplane certs", "err", err)
 		return nil, err
@@ -1593,13 +1613,9 @@ func (s *NodeAgentServer) UpdateAndFetchKubeAdmJoinStrings(
 	return response, nil
 }
 
-// uploadControlPlaneCerts runs the kubeadm upload-certs phase and returns the certificate key it prints.
-func (s *NodeAgentServer) uploadControlPlaneCerts() (string, error) {
-	args := []string{kubeadmCmdInit, kubeadmCmdPhase, "upload-certs", "--upload-certs"}
-	configPath := s.initConfigFile()
-	if _, err := os.Stat(configPath); err == nil {
-		args = append(args, "--config", configPath)
-	}
+// uploadControlPlaneCerts runs the kubeadm upload-certs phase with the config at configPath and returns the certificate key it prints.
+func (s *NodeAgentServer) uploadControlPlaneCerts(configPath string) (string, error) {
+	args := []string{kubeadmCmdInit, kubeadmCmdPhase, "upload-certs", "--upload-certs", "--config", configPath}
 	cmd := "kubeadm " + strings.Join(args, " ")
 	output, err := s.Runner.Run("kubeadm", args, &nvkeutils.CommandOptions{})
 	out := strings.TrimSpace(string(output))
@@ -1617,6 +1633,101 @@ func (s *NodeAgentServer) uploadControlPlaneCerts() (string, error) {
 		return "", fmt.Errorf("%s: the certificate key in the output is not a 32-byte hex string", cmd)
 	}
 	return fields[0], nil
+}
+
+// writeUploadCertsConfig writes the kubeadm config for the upload-certs phase and returns its path.
+//
+// The phase reads three settings from its config. The local API endpoint is where kubeadm sends its
+// API calls (kubeadm 1.33.12, 1.34.8, 1.35.5, 1.36.1 and later), so it must be an address in the API
+// server certificate of this node. With no config, kubeadm takes the address of the default route
+// interface, which is not always a node address. The certificates directory and the etcd settings
+// name the files that the phase uploads.
+//
+// The config that kubeadm init ran with has all three, but only the init node has that file, and
+// only until /tmp is cleared. So the agent builds the config from what kubeadm keeps on every
+// control plane node: the endpoint annotation of the API server static pod, and the
+// ClusterConfiguration in the kubeadm-config ConfigMap. kubeadm join rebuilds its own
+// configuration from the same two sources.
+func (s *NodeAgentServer) writeUploadCertsConfig() (string, error) {
+	manifestPath := s.resolveFilePath(kubeAPIServerManifestPath)
+	manifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return "", fmt.Errorf("reading the API server manifest: %w", err)
+	}
+	endpoint, err := apiServerAdvertiseEndpoint(manifest)
+	if err != nil {
+		return "", fmt.Errorf("API server manifest %s: %w", manifestPath, err)
+	}
+
+	kubectlArgs := []string{
+		"--kubeconfig", KubeConfig, "--request-timeout=30s", "--namespace", kubeSystemNamespace,
+		kubectlGetCommand, "configmap", kubeadmConfigMapName, "--output", "jsonpath={.data.ClusterConfiguration}",
+	}
+	output, err := s.Runner.RunSplitOutput("kubectl", kubectlArgs, &nvkeutils.CommandOptions{})
+	if err != nil {
+		return "", fmt.Errorf("reading the %s ConfigMap: %w: %s", kubeadmConfigMapName, err, strings.TrimSpace(string(output.Stderr)))
+	}
+	config, err := uploadCertsConfig(endpoint, string(output.Stdout))
+	if err != nil {
+		return "", fmt.Errorf("%s ConfigMap: %w", kubeadmConfigMapName, err)
+	}
+
+	configPath := s.resolveFilePath(uploadCertsConfigPath)
+	if err := s.FileWriter.WriteFile(configPath, config, 0o600); err != nil {
+		return "", fmt.Errorf("writing %s: %w", configPath, err)
+	}
+	slog.Info("wrote the kubeadm config for upload-certs", "path", configPath, "localAPIEndpoint", endpoint.String())
+	return configPath, nil
+}
+
+// apiServerAdvertiseEndpoint returns the advertise address and the bind port that kubeadm recorded
+// in the API server static pod manifest.
+func apiServerAdvertiseEndpoint(manifest []byte) (netip.AddrPort, error) {
+	var pod struct {
+		Metadata struct {
+			Annotations map[string]string `yaml:"annotations"`
+		} `yaml:"metadata"`
+	}
+	if err := yaml.Unmarshal(manifest, &pod); err != nil {
+		return netip.AddrPort{}, fmt.Errorf("parsing the manifest: %w", err)
+	}
+	value, ok := pod.Metadata.Annotations[kubeAPIServerAdvertiseEndpointAnnotation]
+	if !ok {
+		return netip.AddrPort{}, fmt.Errorf("annotation %s is not set", kubeAPIServerAdvertiseEndpointAnnotation)
+	}
+	endpoint, err := netip.ParseAddrPort(value)
+	if err != nil {
+		return netip.AddrPort{}, fmt.Errorf("annotation %s: %w", kubeAPIServerAdvertiseEndpointAnnotation, err)
+	}
+	return endpoint, nil
+}
+
+// uploadCertsConfig returns the kubeadm config for the upload-certs phase: an InitConfiguration that
+// carries only the local API endpoint, followed by the ClusterConfiguration of the cluster as it is.
+func uploadCertsConfig(endpoint netip.AddrPort, clusterConfiguration string) ([]byte, error) {
+	// The InitConfiguration takes the API version of the stored ClusterConfiguration,
+	// because that is a version the kubeadm of this cluster reads.
+	var stored struct {
+		APIVersion string `yaml:"apiVersion"`
+	}
+	if err := yaml.Unmarshal([]byte(clusterConfiguration), &stored); err != nil {
+		return nil, fmt.Errorf("parsing the ClusterConfiguration: %w", err)
+	}
+	if stored.APIVersion == "" {
+		return nil, errors.New("no ClusterConfiguration with an apiVersion")
+	}
+	initConfiguration, err := yaml.Marshal(map[string]any{
+		"apiVersion": stored.APIVersion,
+		"kind":       "InitConfiguration",
+		"localAPIEndpoint": map[string]any{
+			"advertiseAddress": endpoint.Addr().String(),
+			"bindPort":         endpoint.Port(),
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("rendering the InitConfiguration: %w", err)
+	}
+	return []byte(string(initConfiguration) + "---\n" + strings.TrimSpace(clusterConfiguration) + "\n"), nil
 }
 
 // initConfigFile returns the InitConfiguration file kubeadm init ran with.

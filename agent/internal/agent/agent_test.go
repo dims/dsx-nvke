@@ -1566,70 +1566,294 @@ func TestUpdateAndFetchKubeAdmJoinStrings(t *testing.T) {
 	const joinCmd = "kubeadm join 172.31.255.200:6443 --token abcdef.0123456789abcdef --discovery-token-ca-cert-hash sha256:deadbeef"
 	uploaded := "[upload-certs] Storing the certificates in Secret \"kubeadm-certs\" in the \"kube-system\" Namespace\n" +
 		"[upload-certs] Using certificate key:\n" + key + "\n"
-	// What kubeadm 1.36 prints when the phase runs without --config on a node
-	// whose default-route address is not in the apiserver certificate.
+	// What kubeadm 1.36 prints when the phase runs without a local API endpoint on a
+	// node whose default-route address is not in the apiserver certificate.
 	refused := "I0915 02:06:22.985721   10297 version.go:260] remote version is much newer: v1.37.0; falling back to: stable-1.36\n" +
 		"error: error execution phase upload-certs: could not bootstrap the admin user in file admin.conf: " +
 		"tls: failed to verify certificate: x509: certificate is valid for 172.31.1.11, not 192.168.200.3\n"
 
-	t.Log("Doing: pointing the agent at an init config on disk, as ExecuteKubeadmInit leaves it")
-	configPath := filepath.Join(t.TempDir(), "kubeadm-init-config.yaml")
-	require.NoError(t, os.WriteFile(configPath, []byte("apiVersion: kubeadm.k8s.io/v1beta4\nkind: InitConfiguration\n"), 0o600))
-	uploadArgs := []string{kubeadmCmdInit, kubeadmCmdPhase, "upload-certs", "--upload-certs", "--config", configPath}
+	// The node address 172.31.1.11 is on a second interface and the default route is
+	// on another one. kubeadm init and kubeadm join both record the node address in
+	// the API server manifest.
+	const manifest = `apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    kubeadm.kubernetes.io/kube-apiserver.advertise-address.endpoint: 172.31.1.11:6443
+  name: kube-apiserver
+  namespace: kube-system
+spec:
+  containers:
+  - name: kube-apiserver
+    command:
+    - kube-apiserver
+    - --advertise-address=172.31.1.11
+`
+	const clusterConfiguration = `apiVersion: kubeadm.k8s.io/v1beta4
+certificatesDir: /etc/kubernetes/pki
+controlPlaneEndpoint: 172.31.255.200:6443
+etcd:
+  local:
+    dataDir: /var/lib/etcd
+kind: ClusterConfiguration
+kubernetesVersion: v1.36.4
+`
+	const wantConfig = `apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: 172.31.1.11
+  bindPort: 6443
+---
+` + clusterConfiguration
+	// A config in the place where kubeadm init leaves the one it ran with. It names
+	// another address, so the call fails if the step still reads that file.
+	const initConfig = "apiVersion: kubeadm.k8s.io/v1beta4\nkind: InitConfiguration\nlocalAPIEndpoint:\n  advertiseAddress: 192.168.200.3\n"
+
+	kubectlArgs := []string{
+		"--kubeconfig", KubeConfig, "--request-timeout=30s", "--namespace", "kube-system",
+		"get", "configmap", "kubeadm-config", "--output", "jsonpath={.data.ClusterConfiguration}",
+	}
 	tokenArgs := []string{"token", "create", "--print-join-command"}
 	reply := func(out string, err error) runFunc {
 		return func(string, []string, *nvkeutils.CommandOptions) ([]byte, error) { return []byte(out), err }
 	}
+	initNode := NodeStatus{Role: ControlPlaneRole, Phase: InitPhase, Status: ReadyStatus, CompletedPhases: []string{InitPhase}}
+	joinedNode := NodeStatus{Role: ControlPlaneRole, Phase: JoinPhase, Status: ReadyStatus, CompletedPhases: []string{JoinPhase}}
 
 	tests := []struct {
-		name    string
-		runners []runner
-		wantErr string
+		name         string
+		nodeStatus   NodeStatus
+		initConfig   bool   // a config from kubeadm init is still on disk
+		manifest     string // empty: this node has no API server manifest
+		kubectl      runFunc
+		writeErr     error
+		upload       runFunc
+		wantErr      string
+		wantCode     codes.Code
+		wantRunCalls int
 	}{
 		{
-			name: "passes the init config to upload-certs and returns the printed key",
-			runners: []runner{
-				runForCommand("kubeadm", uploadArgs, reply(uploaded, nil)),
-				runForCommand("kubeadm", tokenArgs, reply(joinCmd+"\n", nil)),
-			},
+			name:         "init node: the config comes from the node and the cluster, not from the init config on disk",
+			nodeStatus:   initNode,
+			initConfig:   true,
+			manifest:     manifest,
+			kubectl:      reply(clusterConfiguration, nil),
+			upload:       reply(uploaded, nil),
+			wantRunCalls: 3,
 		},
 		{
-			name:    "a failed upload-certs is an error, never a join string",
-			runners: []runner{runForCommand("kubeadm", uploadArgs, reply(refused, errors.New("exit status 1")))},
-			wantErr: "exit status 1",
+			name:         "joined control plane node that never had an init config",
+			nodeStatus:   joinedNode,
+			manifest:     manifest,
+			kubectl:      reply(clusterConfiguration, nil),
+			upload:       reply(uploaded, nil),
+			wantRunCalls: 3,
 		},
 		{
-			name:    "output without a certificate key is an error",
-			runners: []runner{runForCommand("kubeadm", uploadArgs, reply(refused, nil))},
-			wantErr: "no certificate key",
+			name:         "init node after a restart: the init config is gone",
+			nodeStatus:   initNode,
+			manifest:     manifest,
+			kubectl:      reply(clusterConfiguration, nil),
+			upload:       reply(uploaded, nil),
+			wantRunCalls: 3,
+		},
+		{
+			name:         "a failed upload-certs is an error, never a join string",
+			nodeStatus:   joinedNode,
+			manifest:     manifest,
+			kubectl:      reply(clusterConfiguration, nil),
+			upload:       reply(refused, errors.New("exit status 1")),
+			wantErr:      "exit status 1",
+			wantCode:     codes.Unknown,
+			wantRunCalls: 2,
+		},
+		{
+			name:         "output without a certificate key is an error",
+			nodeStatus:   joinedNode,
+			manifest:     manifest,
+			kubectl:      reply(clusterConfiguration, nil),
+			upload:       reply(refused, nil),
+			wantErr:      "no certificate key",
+			wantCode:     codes.Unknown,
+			wantRunCalls: 2,
+		},
+		{
+			name:         "no API server manifest: kubeadm does not run with a guessed address",
+			nodeStatus:   joinedNode,
+			kubectl:      reply(clusterConfiguration, nil),
+			upload:       reply(uploaded, nil),
+			wantErr:      "reading the API server manifest",
+			wantCode:     codes.FailedPrecondition,
+			wantRunCalls: 0,
+		},
+		{
+			name:         "the ClusterConfiguration cannot be read: kubeadm does not run",
+			nodeStatus:   joinedNode,
+			manifest:     manifest,
+			kubectl:      reply("", errors.New("exit status 1")),
+			upload:       reply(uploaded, nil),
+			wantErr:      "reading the kubeadm-config ConfigMap: exit status 1: Unable to connect to the server",
+			wantCode:     codes.FailedPrecondition,
+			wantRunCalls: 1,
+		},
+		{
+			name:         "the config cannot be written: kubeadm does not run",
+			nodeStatus:   joinedNode,
+			manifest:     manifest,
+			kubectl:      reply(clusterConfiguration, nil),
+			writeErr:     errors.New("disk full"),
+			upload:       reply(uploaded, nil),
+			wantErr:      "disk full",
+			wantCode:     codes.FailedPrecondition,
+			wantRunCalls: 1,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Log("Doing: laying out the node: the API server manifest, and the init config when the node still has it")
+			root := t.TempDir()
+			if tt.manifest != "" {
+				manifestPath := filepath.Join(root, kubeAPIServerManifestPath)
+				require.NoError(t, os.MkdirAll(filepath.Dir(manifestPath), 0o755))
+				require.NoError(t, os.WriteFile(manifestPath, []byte(tt.manifest), 0o600))
+			}
+			initConfigPath := filepath.Join(t.TempDir(), "kubeadm-init-config.yaml")
+			if tt.initConfig {
+				require.NoError(t, os.WriteFile(initConfigPath, []byte(initConfig), 0o600))
+			}
+
+			// Only these three commands are answered. kubeadm with no config, or with
+			// the init config, is an unexpected command and fails the call. What kubectl
+			// prints on stderr belongs in an error and never in the config.
+			configPath := filepath.Join(root, uploadCertsConfigPath)
+			uploadArgs := []string{kubeadmCmdInit, kubeadmCmdPhase, "upload-certs", "--upload-certs", "--config", configPath}
+			commands := &MockRunner{
+				Runners: []runner{
+					runForCommand("kubectl", kubectlArgs, tt.kubectl),
+					runForCommand("kubeadm", uploadArgs, tt.upload),
+					runForCommand("kubeadm", tokenArgs, reply(joinCmd+"\n", nil)),
+				},
+				Stderr: []byte("Unable to connect to the server\n"),
+				Err:    errors.New("unexpected command"),
+			}
+			files := &MockFileWriter{Err: tt.writeErr}
+			nodeStatus := tt.nodeStatus
 			server := &NodeAgentServer{
-				Runner:         &MockRunner{Runners: tt.runners, Err: errors.New("unexpected command")},
-				FileWriter:     &MockFileWriter{},
+				Runner:         commands,
+				FileWriter:     files,
 				Persister:      &MockPersister{},
-				NodeStatus:     &NodeStatus{Role: ControlPlaneRole},
-				initConfigPath: configPath,
+				NodeStatus:     &nodeStatus,
+				RootPath:       root,
+				initConfigPath: initConfigPath,
 			}
 
 			t.Log("Doing: asking for fresh join strings")
 			resp, err := server.UpdateAndFetchKubeAdmJoinStrings(context.Background(), &pb.KubeadmJoinStringRequest{})
 
+			require.Equal(t, tt.wantRunCalls, commands.RunCalls)
 			if tt.wantErr != "" {
 				t.Log("Testing: the RPC fails and no join string is recorded")
 				require.ErrorContains(t, err, tt.wantErr)
+				require.Equal(t, tt.wantCode, status.Code(err))
 				require.Nil(t, resp)
 				require.Empty(t, server.NodeStatus.JoinInfo.ControlPlaneJoinString)
 				return
 			}
 
-			t.Log("Testing: the control-plane join string carries the real key and the worker string the plain command")
+			t.Log("Testing: kubeadm ran with a config that carries the advertise address of this node")
 			require.NoError(t, err)
+			require.Equal(t, configPath, files.WrittenPath)
+			require.Equal(t, wantConfig, string(files.WrittenData))
+			require.Equal(t, os.FileMode(0o600), files.WrittenPerms)
+
+			t.Log("Testing: the control-plane join string carries the real key and the worker string the plain command")
 			require.Equal(t, joinCmd+" --control-plane --certificate-key "+key, resp.GetControlplaneJoinString())
 			require.Equal(t, joinCmd, resp.GetWorkerJoinString())
 			require.Equal(t, resp.GetControlplaneJoinString(), server.NodeStatus.JoinInfo.ControlPlaneJoinString)
+		})
+	}
+}
+
+func TestUploadCertsConfig(t *testing.T) {
+	manifestWith := func(annotations string) string {
+		return "apiVersion: v1\nkind: Pod\nmetadata:\n  annotations:" + annotations + "\n  name: kube-apiserver\n"
+	}
+	const endpointAnnotation = "\n    kubeadm.kubernetes.io/kube-apiserver.advertise-address.endpoint: "
+	const v1beta4 = "apiVersion: kubeadm.k8s.io/v1beta4\ncertificatesDir: /srv/pki\nkind: ClusterConfiguration\nkubernetesVersion: v1.36.4\n"
+	const v1beta3 = "apiVersion: kubeadm.k8s.io/v1beta3\nkind: ClusterConfiguration\nkubernetesVersion: v1.30.14\n"
+
+	tests := []struct {
+		name                 string
+		manifest             string
+		clusterConfiguration string
+		want                 string
+		wantErr              string
+	}{
+		{
+			name:                 "the advertise address and the bind port come from the manifest, the rest from the cluster",
+			manifest:             manifestWith(endpointAnnotation + "10.0.0.2:6443"),
+			clusterConfiguration: v1beta4,
+			want: "apiVersion: kubeadm.k8s.io/v1beta4\nkind: InitConfiguration\n" +
+				"localAPIEndpoint:\n  advertiseAddress: 10.0.0.2\n  bindPort: 6443\n---\n" + v1beta4,
+		},
+		{
+			name:                 "the InitConfiguration takes the API version that the cluster stores",
+			manifest:             manifestWith(endpointAnnotation + "10.0.0.2:6443"),
+			clusterConfiguration: v1beta3,
+			want: "apiVersion: kubeadm.k8s.io/v1beta3\nkind: InitConfiguration\n" +
+				"localAPIEndpoint:\n  advertiseAddress: 10.0.0.2\n  bindPort: 6443\n---\n" + v1beta3,
+		},
+		{
+			name:                 "IPv6 address and another bind port",
+			manifest:             manifestWith(endpointAnnotation + `"[fd00:10::2]:8443"`),
+			clusterConfiguration: v1beta4,
+			want: "apiVersion: kubeadm.k8s.io/v1beta4\nkind: InitConfiguration\n" +
+				"localAPIEndpoint:\n  advertiseAddress: fd00:10::2\n  bindPort: 8443\n---\n" + v1beta4,
+		},
+		{
+			name:                 "manifest without the annotation",
+			manifest:             manifestWith("\n    kubernetes.io/config.source: file"),
+			clusterConfiguration: v1beta4,
+			wantErr:              "advertise-address.endpoint is not set",
+		},
+		{
+			name:                 "annotation that is not an address and a port",
+			manifest:             manifestWith(endpointAnnotation + "10.0.0.2"),
+			clusterConfiguration: v1beta4,
+			wantErr:              "advertise-address.endpoint: ",
+		},
+		{
+			name:                 "manifest that is not YAML",
+			manifest:             "{",
+			clusterConfiguration: v1beta4,
+			wantErr:              "parsing the manifest",
+		},
+		{
+			name:     "ConfigMap without a ClusterConfiguration",
+			manifest: manifestWith(endpointAnnotation + "10.0.0.2:6443"),
+			wantErr:  "no ClusterConfiguration with an apiVersion",
+		},
+		{
+			name:                 "ClusterConfiguration that is not a YAML mapping",
+			manifest:             manifestWith(endpointAnnotation + "10.0.0.2:6443"),
+			clusterConfiguration: "- kubeadm.k8s.io/v1beta4\n",
+			wantErr:              "parsing the ClusterConfiguration",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			endpoint, err := apiServerAdvertiseEndpoint([]byte(tt.manifest))
+			var got []byte
+			if err == nil {
+				got, err = uploadCertsConfig(endpoint, tt.clusterConfiguration)
+			}
+
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, string(got))
 		})
 	}
 }
@@ -1665,7 +1889,7 @@ func TestExecuteKubeadmInitWithoutConfigRemovesStaleInitConfig(t *testing.T) {
 				NoCniInstall:         true,
 			})
 
-			t.Log("Testing: no config is on disk for upload-certs to pick up, and the init succeeded")
+			t.Log("Testing: no stale config is left on disk, and the init succeeded")
 			_, err := os.Stat(configPath)
 			require.ErrorIs(t, err, fs.ErrNotExist)
 			require.Equal(t, ReadyStatus, server.NodeStatus.Status)
