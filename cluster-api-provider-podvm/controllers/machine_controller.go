@@ -8,12 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilnet "k8s.io/apimachinery/pkg/util/net"
 	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	capiutil "sigs.k8s.io/cluster-api/util"
@@ -50,7 +52,11 @@ const (
 
 	podVMClusterKind = "PodVMCluster"
 	podVMMachineKind = "PodVMMachine"
-	machineFinalizer = "podvmmachine.infrastructure.cluster.x-k8s.io"
+
+	// machineFinalizer holds a PodVMMachine until its objects are gone. The
+	// name has a domain and a path. The API server warns at every write of an
+	// object whose finalizer has a domain and no path.
+	machineFinalizer = "podvm.infrastructure.cluster.x-k8s.io/machine-cleanup"
 
 	// rebootAnnotation is the annotation on the Machine with which the NVKE
 	// controller asks for a hard reboot. Its value is the time of the request.
@@ -498,20 +504,37 @@ func (r *MachineReconciler) reconcileRunningPod(
 	// A new cluster has no API server before its first node is initialized,
 	// and the pod of this machine may be that node. So the look at the Node
 	// never holds back the provisioned flag.
-	result, nodeProblem, nodeErr := r.reconcileNodeProviderID(ctx, machine, ownerMachine, logger)
+	//
+	// A machine that is on its way out gets no look at all. The NVKE
+	// controller stops the API servers of a cluster before it deletes the
+	// Machines, so the look would only find a closed port.
+	var look nodeLook
+	var nodeErr error
+	if ownerMachine.DeletionTimestamp.IsZero() {
+		look, nodeErr = r.reconcileNodeProviderID(ctx, machine, ownerMachine, logger)
+	} else {
+		logger.Debug("Owner Machine is being deleted, not looking at the tenant Node")
+	}
 
 	before := machine.DeepCopy()
 	machine.Status.Initialization.Provisioned = ptr.To(true)
-	if nodeProblem != nil {
-		setCondition(machine, metav1.ConditionFalse, nodeProblem.reason, nodeProblem.message)
-	} else {
+	running := fmt.Sprintf("Pod %s/%s runs and its node agent answers", pod.Namespace, pod.Name)
+	switch {
+	case look.conflict != nil:
+		setCondition(machine, metav1.ConditionFalse, look.conflict.reason, look.conflict.message)
+	case look.noAnswer:
+		// The machine itself is ready: its pod runs and its node agent
+		// answers. The message is the same for every kind of silence, so a
+		// second look that fails in another way writes nothing.
 		setCondition(machine, metav1.ConditionTrue, infrav1.PodRunningReason,
-			fmt.Sprintf("Pod %s/%s runs and its node agent answers", pod.Namespace, pod.Name))
+			running+". The API server of the new cluster does not answer, so the provider ID of the Node is not checked")
+	default:
+		setCondition(machine, metav1.ConditionTrue, infrav1.PodRunningReason, running)
 	}
 	if err := r.patchStatus(ctx, machine, before); err != nil {
 		return ctrl.Result{}, errors.Join(err, nodeErr)
 	}
-	return result, nodeErr
+	return look.result, nodeErr
 }
 
 // reconcileDelete deletes the pod, the two volume claims and the copy of the
@@ -556,57 +579,89 @@ func (r *MachineReconciler) reconcileDelete(
 	return ctrl.Result{}, nil
 }
 
+// nodeLook is what one look at the Node of the new cluster found.
+type nodeLook struct {
+	// result holds the requeue for a state that clears with no help: the Node
+	// does not exist yet, or no API server answers.
+	result ctrl.Result
+	// conflict is set when the Node holds another provider ID. The provider
+	// never overwrites it, and the machine is not ready.
+	conflict *machineProblem
+	// noAnswer is true when no API server of the new cluster answered. The
+	// machine stays ready, and the Ready condition says what is not checked.
+	noAnswer bool
+}
+
 // reconcileNodeProviderID copies the infrastructure identity to the Node of
 // the new cluster. The Node can appear long after the pod runs, so missing
-// prerequisites cause a timed requeue. A Node that holds another provider ID
-// comes back as a problem: the provider never overwrites it.
+// prerequisites cause a timed requeue.
+//
+// An API server that does not answer is one of those prerequisites, not a
+// failed reconcile. It is the normal state of a cluster before its first node
+// is initialized and after the NVKE controller reset its control plane nodes
+// for a delete. An error stays an error when an API server answered and
+// refused the call, for example for missing rights.
 func (r *MachineReconciler) reconcileNodeProviderID(
 	ctx context.Context,
 	machine *infrav1.PodVMMachine,
 	ownerMachine *clusterv1.Machine,
 	logger *slog.Logger,
-) (ctrl.Result, *machineProblem, error) {
+) (nodeLook, error) {
+	waitFor := nodeLook{result: ctrl.Result{RequeueAfter: retryAfter}}
+
 	cluster := &clusterv1.Cluster{}
 	clusterKey := client.ObjectKey{Namespace: ownerMachine.Namespace, Name: ownerMachine.Spec.ClusterName}
 	if err := r.client.Get(ctx, clusterKey, cluster); err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.Info("Waiting for the CAPI Cluster", "cluster", ownerMachine.Spec.ClusterName)
-			return ctrl.Result{RequeueAfter: retryAfter}, nil, nil
+			return waitFor, nil
 		}
-		return ctrl.Result{}, nil, fmt.Errorf("failed to get Cluster for tenant Node: %w", err)
+		return nodeLook{}, fmt.Errorf("failed to get Cluster for tenant Node: %w", err)
 	}
 
 	tenantCtx, cancel := context.WithTimeout(ctx, tenantAPITimeout)
 	defer cancel()
 
+	noAnswer := func(action string, err error) (nodeLook, error) {
+		logger.Info("API server of the new cluster does not answer, the provider ID of the Node waits",
+			"cluster", cluster.Name, "node", ownerMachine.Name, "action", action, "error", err)
+		return nodeLook{result: ctrl.Result{RequeueAfter: retryAfter}, noAnswer: true}, nil
+	}
+
 	tenantClient, err := r.tenantClients.ClientForCluster(tenantCtx, cluster)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.Info("Waiting for the tenant kubeconfig Secret", "cluster", cluster.Name)
-			return ctrl.Result{RequeueAfter: retryAfter}, nil, nil
+			return waitFor, nil
 		}
-		return ctrl.Result{}, nil, fmt.Errorf("failed to create tenant client: %w", err)
+		if tenantAPIServerGaveNoAnswer(err) {
+			return noAnswer("create tenant client", err)
+		}
+		return nodeLook{}, fmt.Errorf("failed to create tenant client: %w", err)
 	}
 
 	node := &corev1.Node{}
 	if err := tenantClient.Get(tenantCtx, client.ObjectKey{Name: ownerMachine.Name}, node); err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.Info("Waiting for the tenant Node", "node", ownerMachine.Name)
-			return ctrl.Result{RequeueAfter: retryAfter}, nil, nil
+			return waitFor, nil
 		}
-		return ctrl.Result{}, nil, fmt.Errorf("failed to get tenant Node: %w", err)
+		if tenantAPIServerGaveNoAnswer(err) {
+			return noAnswer("get tenant Node", err)
+		}
+		return nodeLook{}, fmt.Errorf("failed to get tenant Node: %w", err)
 	}
 	if node.Spec.ProviderID == machine.Spec.ProviderID {
-		return ctrl.Result{}, nil, nil
+		return nodeLook{}, nil
 	}
 	if node.Spec.ProviderID != "" {
 		logger.Error("Tenant Node holds a different provider ID", "node", node.Name,
 			"providerID", node.Spec.ProviderID, "expectedProviderID", machine.Spec.ProviderID)
-		return ctrl.Result{}, &machineProblem{
+		return nodeLook{conflict: &machineProblem{
 			reason: infrav1.NodeProviderIDConflictReason,
 			message: fmt.Sprintf("Tenant Node %s has provider ID %q, expected %q",
 				node.Name, node.Spec.ProviderID, machine.Spec.ProviderID),
-		}, nil
+		}}, nil
 	}
 
 	patch := client.MergeFromWithOptions(node.DeepCopy(), client.MergeFromWithOptimisticLock{})
@@ -614,13 +669,34 @@ func (r *MachineReconciler) reconcileNodeProviderID(
 	if err := tenantClient.Patch(tenantCtx, node, patch); err != nil {
 		if apierrors.IsConflict(err) {
 			logger.Info("Tenant Node changed while setting its provider ID; retrying", "node", node.Name)
-			return ctrl.Result{RequeueAfter: retryNow}, nil, nil
+			return nodeLook{result: ctrl.Result{RequeueAfter: retryNow}}, nil
 		}
-		return ctrl.Result{}, nil, fmt.Errorf("failed to patch tenant Node provider ID: %w", err)
+		if tenantAPIServerGaveNoAnswer(err) {
+			return noAnswer("patch tenant Node", err)
+		}
+		return nodeLook{}, fmt.Errorf("failed to patch tenant Node provider ID: %w", err)
 	}
 
 	logger.Info("Set tenant Node provider ID", "node", node.Name, "providerID", node.Spec.ProviderID)
-	return ctrl.Result{}, nil, nil
+	return nodeLook{}, nil
+}
+
+// tenantAPIServerGaveNoAnswer reports whether a call to the new cluster failed
+// because no API server answered it: the connection was refused or reset, the
+// call ran into its time limit, or the server said that it cannot serve now.
+//
+// An answer of an API server that rejects the call is not in this set. A
+// forbidden or an invalid call does not get better by waiting.
+func tenantAPIServerGaveNoAnswer(err error) bool {
+	var networkErr net.Error
+	return errors.As(err, &networkErr) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		utilnet.IsConnectionRefused(err) ||
+		utilnet.IsConnectionReset(err) ||
+		utilnet.IsProbableEOF(err) ||
+		apierrors.IsServiceUnavailable(err) ||
+		apierrors.IsTimeout(err) ||
+		apierrors.IsServerTimeout(err)
 }
 
 // reportProblem turns a machineProblem into the Ready condition and a timed

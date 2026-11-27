@@ -65,10 +65,27 @@ const (
 	// apiServerPort and apiServerReadyPath describe the readiness probe of a
 	// control plane pod. A Service of the caller then sends traffic only to a
 	// pod whose API server is ready.
+	//
+	// The probe runs each 2 seconds, waits 3 seconds for an answer, and takes
+	// a pod out after 3 failures in a row. So a pod is out after about 6
+	// seconds of failed answers, and after about 9 seconds when each probe
+	// runs into its time limit. One slow answer does not take a pod out: with
+	// a time limit of 1 second and one failure, a slow disk took all three
+	// pods of a control plane out at one time, and the shared address refused
+	// every call.
 	apiServerPort             = 6443
 	apiServerReadyPath        = "/readyz"
 	readinessPeriodSeconds    = 2
-	readinessFailureThreshold = 1
+	readinessTimeoutSeconds   = 3
+	readinessFailureThreshold = 3
+
+	// podTerminationGracePeriodSeconds is the time a pod gets to stop before
+	// the kubelet kills it. In the lab a control plane node did not stop by
+	// itself in the default of 30 seconds, so each pod that is deleted costs
+	// the whole wait: a reboot request, a pod that ended, and each machine of
+	// a cluster delete. 20 seconds is the value of the lab pods of phase 1.
+	// The node keeps its state on the two volumes.
+	podTerminationGracePeriodSeconds = 20
 
 	varVolumeName       = "var"
 	etcdVolumeName      = "etcd"
@@ -455,6 +472,7 @@ func buildPod(
 				Scheme: corev1.URISchemeHTTPS,
 			}},
 			PeriodSeconds:    readinessPeriodSeconds,
+			TimeoutSeconds:   readinessTimeoutSeconds,
 			FailureThreshold: readinessFailureThreshold,
 		}
 	}
@@ -470,11 +488,12 @@ func buildPod(
 			RuntimeClassName: ptr.To(infraCluster.Spec.RuntimeClassName),
 			// The node needs no token of the host cluster and no Service
 			// variables of the pod namespace.
-			AutomountServiceAccountToken: ptr.To(false),
-			EnableServiceLinks:           ptr.To(false),
-			RestartPolicy:                corev1.RestartPolicyAlways,
-			Affinity:                     podAffinity(ownerMachine, infraCluster),
-			Containers:                   []corev1.Container{container},
+			AutomountServiceAccountToken:  ptr.To(false),
+			EnableServiceLinks:            ptr.To(false),
+			RestartPolicy:                 corev1.RestartPolicyAlways,
+			TerminationGracePeriodSeconds: ptr.To(int64(podTerminationGracePeriodSeconds)),
+			Affinity:                      podAffinity(ownerMachine, infraCluster),
+			Containers:                    []corev1.Container{container},
 			Volumes: []corev1.Volume{
 				{Name: varVolumeName, VolumeSource: corev1.VolumeSource{
 					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: varClaimName(podName)},

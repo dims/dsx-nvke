@@ -156,7 +156,8 @@ This is the contract with the node image. The image side is not in this module.
 | Hardware address | `02:00` and the four bytes of the address. `172.28.1.21` gives `02:00:ac:1c:01:15` |
 | Labels | `cluster.x-k8s.io/cluster-name`, `cluster.x-k8s.io/control-plane` when the Machine has it, `podvm.infrastructure.cluster.x-k8s.io/machine-name`, and three labels that name the owner `PodVMMachine` |
 | Startup probe | For each machine: a TCP connection to port 15005 (`nvke-agent`), each 2 seconds, for at most 20 minutes |
-| Readiness probe | For a control plane machine: HTTPS GET `/readyz` on port 6443, each 2 seconds |
+| Readiness probe | For a control plane machine: HTTPS GET `/readyz` on port 6443, each 2 seconds, with 3 seconds for an answer. The pod is out after 3 failures in a row |
+| Grace period | 20 seconds for a pod that is deleted |
 | Provider ID | `podvm://<pod-namespace>/<pod-name>` |
 
 The pod has no token of the host cluster and no service links.
@@ -164,6 +165,15 @@ The pod has no token of the host cluster and no service links.
 A Service of the caller can select the first two labels to get one shared
 endpoint for the API servers. Only a pod with a ready API server is behind it.
 The provider does not make that Service.
+
+The readiness probe takes a pod out of that Service after about 6 seconds of
+failed answers, and after about 9 seconds when each probe runs into its time
+limit. One slow answer does not take a pod out. With a time limit of 1 second
+and one failure, a slow disk took every pod of a control plane out at one time.
+
+A deleted pod gets 20 seconds to stop. A control plane node does not stop by
+itself in the default of 30 seconds, so a longer time only delays the new pod
+after a reboot request, and the end of a delete.
 
 ### Placement
 
@@ -215,6 +225,17 @@ sets `Node.spec.providerID`.
 The machine controller does not overwrite a different provider ID. It reports
 that conflict in the `Ready` condition. It waits and tries again when the
 kubeconfig Secret or the Node does not exist yet.
+
+An API server that does not answer is a wait too, not an error. This is the
+state of a cluster before its first node is initialized and after the NVKE
+controller reset its control plane nodes for a delete. The machine stays ready,
+the message of the `Ready` condition says that the provider ID of the Node is
+not checked, and the controller looks again after 30 seconds. An API server
+that answers and rejects the call, for example for missing rights, is an error.
+
+The controller does not look at the Node of a machine that is being deleted:
+neither when the `PodVMMachine` has a delete time, nor when its owner Machine
+has one.
 
 ## What the provider does not do
 

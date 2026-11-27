@@ -39,6 +39,11 @@ func TestMachineReconcilerMakesThePodOfTheContract(t *testing.T) {
 	require.Equal(t, ptr.To(false), pod.Spec.EnableServiceLinks)
 	require.Equal(t, corev1.RestartPolicyAlways, pod.Spec.RestartPolicy)
 
+	// A pod that is deleted gets 20 seconds to stop, the value of the lab
+	// pods. A control plane node does not stop by itself in the default of 30
+	// seconds, so the default only makes each new pod wait longer.
+	require.Equal(t, ptr.To(int64(20)), pod.Spec.TerminationGracePeriodSeconds)
+
 	// One privileged container named node, with the entry point of the image.
 	require.Len(t, pod.Spec.Containers, 1)
 	require.Empty(t, pod.Spec.InitContainers)
@@ -110,14 +115,19 @@ func TestMachineReconcilerMakesThePodOfTheContract(t *testing.T) {
 		"podvm.infrastructure.cluster.x-k8s.io/owner-uid":       "uid-" + testMachineName,
 	}, pod.Labels)
 
-	// The readiness probe of a control plane machine.
+	// The readiness probe of a control plane machine. One slow answer must
+	// not take the pod out of the shared Service: the probe waits 3 seconds
+	// for an answer, and the pod is out after 3 failures in a row.
 	require.Equal(t, &corev1.Probe{
 		ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
 			Path: "/readyz", Port: intstr.FromInt32(6443), Scheme: corev1.URISchemeHTTPS,
 		}},
 		PeriodSeconds:    2,
-		FailureThreshold: 1,
+		TimeoutSeconds:   3,
+		FailureThreshold: 3,
 	}, container.ReadinessProbe)
+	// A pod is out after about 6 seconds of failed answers.
+	require.Equal(t, int32(6), container.ReadinessProbe.PeriodSeconds*container.ReadinessProbe.FailureThreshold)
 	require.Nil(t, container.LivenessProbe)
 
 	// The startup probe: a TCP connection to the secure port of the node

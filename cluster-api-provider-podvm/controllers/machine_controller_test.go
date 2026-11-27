@@ -5,12 +5,14 @@ package controllers
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -28,9 +30,21 @@ func TestMachineReconcilerAddsFinalizerBeforeAnythingElse(t *testing.T) {
 	require.Equal(t, ctrl.Result{RequeueAfter: retryNow}, result)
 
 	machine = getInfraMachine(t, k8sClient, testMachineName)
-	require.Contains(t, machine.Finalizers, machineFinalizer)
+	require.Equal(t, []string{"podvm.infrastructure.cluster.x-k8s.io/machine-cleanup"}, machine.Finalizers)
 	require.Empty(t, machine.Status.Address)
 	requireGone(t, k8sClient, &corev1.Pod{}, testMachineName)
+}
+
+// The API server warns at every write of a custom resource whose finalizer has
+// a domain and no path. These are its two checks for a finalizer name.
+func TestMachineFinalizerNameGetsNoWarningFromTheAPIServer(t *testing.T) {
+	require.Empty(t, validation.IsQualifiedName(machineFinalizer))
+
+	domain, path, found := strings.Cut(machineFinalizer, "/")
+	require.True(t, found, "the finalizer name has no path")
+	require.Contains(t, domain, ".")
+	require.NotEmpty(t, path)
+	require.NotContains(t, path, "/")
 }
 
 // Each of these states is a wait, not a failure. The machine takes no address
