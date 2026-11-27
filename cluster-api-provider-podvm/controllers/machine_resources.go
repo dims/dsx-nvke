@@ -172,6 +172,58 @@ func nodeAgentAnswers(pod *corev1.Pod) bool {
 	return false
 }
 
+// podUnschedulable reports whether the scheduler of the host cluster looked
+// for a node for the pod and found none. It also returns the text of the
+// scheduler.
+//
+// The scheduler writes the condition PodScheduled with the status False and
+// the reason Unschedulable after an attempt that found no node. A pod that
+// the scheduler has not looked at has no such condition. A pod with a node
+// has it with the status True. Another reason, for example SchedulerError,
+// is a failure of the scheduler and says nothing about room.
+func podUnschedulable(pod *corev1.Pod) (string, bool) {
+	for i := range pod.Status.Conditions {
+		condition := &pod.Status.Conditions[i]
+		if condition.Type == corev1.PodScheduled {
+			return condition.Message,
+				condition.Status == corev1.ConditionFalse && condition.Reason == corev1.PodReasonUnschedulable
+		}
+	}
+	return "", false
+}
+
+// unschedulableProblem returns what the Ready condition says about a pod that
+// the scheduler cannot place, or nil for a pod that has a node or that the
+// scheduler has not looked at.
+//
+// The failure domain of the Machine is a required node rule of the pod. So
+// when the Machine names one, a pod with no node means that this failure
+// domain has no room for the machine, and the reason says so. The NVKE
+// controller reads that reason and can place the node in another failure
+// domain. With no failure domain every node of the host cluster was a
+// candidate, and the reason is the general one.
+func unschedulableProblem(pod *corev1.Pod, ownerMachine *clusterv1.Machine) *machineProblem {
+	schedulerText, unschedulable := podUnschedulable(pod)
+	if !unschedulable {
+		return nil
+	}
+	if schedulerText == "" {
+		schedulerText = "the scheduler gave no message"
+	}
+
+	if failureDomain := ownerMachine.Spec.FailureDomain; failureDomain != "" {
+		return &machineProblem{
+			reason: infrav1.FailureDomainUnavailableReason,
+			message: fmt.Sprintf("Pod %s/%s cannot be scheduled in the failure domain %q: %s",
+				pod.Namespace, pod.Name, failureDomain, schedulerText),
+		}
+	}
+	return &machineProblem{
+		reason:  infrav1.PodUnschedulableReason,
+		message: fmt.Sprintf("Pod %s/%s cannot be scheduled: %s", pod.Namespace, pod.Name, schedulerText),
+	}
+}
+
 // deletePod deletes exactly the pod that the caller saw. The UID guards
 // against a pod with the same name that was made in the meantime.
 func (r *MachineReconciler) deletePod(ctx context.Context, pod *corev1.Pod) error {

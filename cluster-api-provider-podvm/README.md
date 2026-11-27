@@ -128,7 +128,8 @@ container again, with the same volumes.
 
 Until then the `Ready` condition is false. The reason is `WaitingForPod` while
 the pod does not run, and `WaitingForNodeAgent` while the pod runs and the agent
-does not answer.
+does not answer. A pod that the scheduler cannot place has a reason of its own,
+see [A pod with no place](#a-pod-with-no-place).
 
 The controller reconciles one machine at a time, and the Deployment runs with
 leader election. Both are needed: step 2 is safe only when one writer gives out
@@ -195,6 +196,40 @@ after a reboot request, and the end of a delete.
 has that value in the label `spec.failureDomainLabelKey`, or it is the host node
 with that name. The pods of one cluster prefer different host nodes. That rule
 is a preference, so the extra pod of a rollout can start.
+
+### A pod with no place
+
+The scheduler of the host cluster can find no node for a pod, for example when
+the host node of the failure domain has no free volume or not enough memory. It
+then writes the pod condition `PodScheduled` with the status `False` and the
+reason `Unschedulable`. The pod stays pending, and the scheduler tries again
+when the host cluster changes.
+
+The provider reports that state in the `Ready` condition of the `PodVMMachine`,
+with the status `False`:
+
+| The Machine | Reason | Message |
+|---|---|---|
+| Names a failure domain | `FailureDomainUnavailable` | The pod, the failure domain and the text of the scheduler |
+| Names no failure domain | `PodUnschedulable` | The pod and the text of the scheduler |
+
+The provider does not delete the pod and does not move it. When the pod gets a
+node, the reason goes back to `WaitingForPod`, and the machine comes up the
+usual way. Another reason of `PodScheduled`, for example `SchedulerError`, is
+not reported this way.
+
+`FailureDomainUnavailable` is a contract with the NVKE controller. Cluster API
+copies the `Ready` condition of the `PodVMMachine` into the
+`InfrastructureReady` condition of the Machine, with the same status, reason
+and message. The NVKE controller reads the reason there. When a control plane
+node that never ran waits for 15 minutes with that reason, and the cluster has
+another failure domain, the NVKE controller deletes the node and makes a new
+one in another failure domain. It then does not use the first failure domain
+for 3 hours. It also shows the message as the pending message of the node. The
+provider sets this reason for no other state.
+
+The new node can land on a host node that already has a control plane node of
+the cluster, because the spread rule of the pods is a preference.
 
 ### A lost pod and a reboot
 
@@ -266,8 +301,9 @@ has one.
 - It does not move a pod after the loss of a host node. A volume of a lost node
   may not attach on another node, and nothing fences the old virtual machine.
   An operator starts the replace.
-- It does not report "no capacity". A pod that cannot be scheduled stays
-  pending, and the machine stays not provisioned.
+- It does not act on a pod that cannot be scheduled. The pod stays pending, and
+  the machine stays not provisioned. The provider reports the state, and the
+  NVKE controller decides.
 - It does not check another user of the node network. The address range must
   belong to the provider alone.
 - It does not support IPv6 addresses. The hardware address comes from an IPv4

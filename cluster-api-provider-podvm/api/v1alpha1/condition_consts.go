@@ -57,7 +57,26 @@ const (
 
 	// WaitingForPodReason means the pod exists and does not run yet, or the
 	// pod of a provisioned machine was lost and its new pod does not run yet.
+	// A pod that the scheduler cannot place has one of the two reasons below.
 	WaitingForPodReason = "WaitingForPod"
+
+	// FailureDomainUnavailableReason means the scheduler of the host cluster
+	// cannot place the pod of the machine, and the owner Machine names a
+	// failure domain. The pod must run in that failure domain, so the failure
+	// domain has no room for this machine. The message names the failure
+	// domain and carries the text of the scheduler.
+	//
+	// The NVKE controller reads this reason. It replaces a control plane node
+	// that waits too long with this reason by a node in another failure
+	// domain. So the text is a contract, and the provider sets it for no
+	// other state.
+	FailureDomainUnavailableReason = "FailureDomainUnavailable"
+
+	// PodUnschedulableReason means the scheduler of the host cluster cannot
+	// place the pod of the machine, and the owner Machine names no failure
+	// domain. No node of the host cluster can take the pod. The message
+	// carries the text of the scheduler.
+	PodUnschedulableReason = "PodUnschedulable"
 
 	// WaitingForNodeAgentReason means the pod runs and the node agent in it
 	// does not answer yet. The startup probe of the pod decides: the machine
