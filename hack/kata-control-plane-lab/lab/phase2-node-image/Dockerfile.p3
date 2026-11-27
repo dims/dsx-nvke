@@ -1,0 +1,21 @@
+# The node image for pods, form p3: the form p2 with ONE change.
+# The CNI images are in the containerd store of the image at build time. The base image has them
+# in a package file (/usr/lib/nvke/e2e/cni-images.deb), and its unit nke-container-cni-images.service
+# installs that package at each start, before the agent units (34 to 57 s in the tests of p2).
+# Here the package is installed at build time, with an import that does not unpack, and the package
+# file is removed. The unit has the condition "the package file exists", so it does not run.
+ARG P2=nvke-node-podvm:bcc4376f-p2
+FROM ${P2}
+COPY build-ctr /usr/local/lib/podvm/build-ctr
+RUN set -eu; \
+    chmod 0755 /usr/local/lib/podvm/build-ctr; \
+    containerd >/tmp/podvm-build-containerd.log 2>&1 & pid=$!; \
+    i=0; until ctr version >/dev/null 2>&1; do i=$((i + 1)); if [ "$i" -gt 30 ]; then cat /tmp/podvm-build-containerd.log; exit 1; fi; sleep 1; done; \
+    before=$(ctr -n k8s.io images ls -q | sort); \
+    NKE_CTR_BIN=/usr/local/lib/podvm/build-ctr dpkg --ignore-depends=containerd,nvke-kubeadm-distro -i /usr/lib/nvke/e2e/cni-images.deb; \
+    ctr -n k8s.io images ls -q | sort >/tmp/podvm-after; echo "$before" | comm -13 - /tmp/podvm-after | sed 's/^/new image: /'; \
+    dpkg -s nvke-cni-ovn-images-2.4.2 | grep '^Status: install ok installed'; \
+    kill "$pid"; wait "$pid" || true; \
+    rm -f /usr/lib/nvke/e2e/cni-images.deb /usr/local/lib/podvm/build-ctr /tmp/podvm-build-containerd.log /tmp/podvm-after; \
+    rm -rf /run/containerd
+LABEL podvm.image-form="p3: CNI images in the containerd store at build time"

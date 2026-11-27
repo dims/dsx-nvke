@@ -1,0 +1,35 @@
+{
+  "name": "${CLUSTER_NAME}",
+  "controlPlaneKubernetesVersion": "1.36.4",
+  "cniPlugin": "ovn-kubernetes",
+  "cniVersion": "2.4.2",
+  "etcdEncrypted": false,
+  "enableCPNodeRecycling": true,
+  "controlPlaneEndpoint": "${IP_API}:6443",
+  "network": {
+    "podCIDR": "${POD_CIDR}",
+    "serviceCIDR": "${SERVICE_CIDR}"
+  },
+  "controlPlaneConfig": {
+    "desiredCount": 3,
+    "maxSurge": 1,
+    "systemReservedMemory": "512Mi",
+    "infra": {
+      "machineTemplate": ${MACHINE_TEMPLATE}
+    }
+  },
+  "infra": {
+    "cluster": {
+      "apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha1",
+      "kind": "PodVMCluster",
+      "metadata": {"name": "${CLUSTER_NAME}"},
+      "spec": {
+        "podNamespace": "${NS}",
+        "runtimeClassName": "${RUNTIME_CLASS}",
+        "networkAttachment": {"name": "nodenet", "namespace": "${NS}"},
+        "addressRange": {"cidr": "${RANGE_CIDR}", "prefixLength": 16},
+        "failureDomainLabelKey": "topology.kubernetes.io/zone"
+      }
+    }
+  }
+}

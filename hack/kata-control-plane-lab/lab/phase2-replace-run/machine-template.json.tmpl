@@ -1,0 +1,17 @@
+{
+  "apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha1",
+  "kind": "PodVMMachineTemplate",
+  "spec": {
+    "template": {
+      "spec": {
+        "image": "${NODE_IMAGE_REF}",
+        "imagePullPolicy": "Never",
+        "resources": {"cpu": "${CPU}", "memory": "${MEMORY}"},
+        "volumes": {
+          "var": {"storageClassName": "${SC}", "size": "20Gi"},
+          "etcd": {"storageClassName": "${SC}", "size": "8Gi"}
+        }
+      }
+    }
+  }
+}

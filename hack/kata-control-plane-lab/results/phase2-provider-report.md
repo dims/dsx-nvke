@@ -2,7 +2,7 @@
 
 Date: 2026-11-26, 17:00 to 17:47 local time. An agent wrote the module and ran the checks. The main session reviewed the reconcile flow, the address allocation, the reboot answer, the delete and the pod builder, and pushed the branch at 17:49. Design: `phase2-design.md`, sections 4, 5 and 5a.
 
-- Branch: `feat/cluster-api-provider-podvm` on `dims/dsx-nvke`, four commits on top of main (`d625fcfa`). https://github.com/dims/dsx-nvke/tree/feat/cluster-api-provider-podvm
+- Branch: `feat/cluster-api-provider-podvm` on `dims/dsx-nvke`, five commits on top of main (`d625fcfa`). https://github.com/dims/dsx-nvke/tree/feat/cluster-api-provider-podvm
 - Worktree: `/scratch/kata-cp/src/nvke-podvm`. Logs: `/scratch/kata-cp/logs/phase2-provider/`.
 - No pull request. The commits have a sign-off, no GPG signature and no agent text.
 - Tested in a cluster on the second machine with the third commit: `lab/phase2-provider-run/result.md` (3 clusters through NVKE, a lost pod, a delete with no operator step).
@@ -16,6 +16,7 @@ Date: 2026-11-26, 17:00 to 17:47 local time. An agent wrote the module and ran t
 | `57f6cac4` | feat(podvm): add the cluster and machine controllers | The two controllers with tests, the generated role. 23 files |
 | `cdc368ea` | feat(podvm): report the address when the node agent answers | The startup probe, the later write of `status.addresses`, a new condition reason, tests, the README. 12 files |
 | `2f2841c5` | fix(podvm): finalizer name, tenant API wait, readiness probe, grace period | Four points from the first cluster test (section 10). 6 files |
+| `bb15b535` | fix(podvm): end a run with no error when the machine is gone | One point from the replace test (section 11). 6 files |
 
 Root files changed, because the checks of the repository need it: `go.work`, the root `Makefile` (two module lists), `hack/coverage.sh`, and four docs pages with the module count and a table row.
 
@@ -193,3 +194,15 @@ Tests: 68 test functions with 130 subtests. The mutation check has 36 rule break
 Not verified without a cluster: that the API server prints no warning for the new name, the error form of a real refused connection, and that the new probe values keep the pods behind the shared Service on a slow disk.
 
 One limit that the agent names: an API endpoint that hangs, and does not refuse, holds one look for up to 30 s. The controller reconciles one machine at a time, so a lost pod of another machine can wait behind it. A shorter time limit for this one look would bound it. Not changed yet.
+
+## 11. A machine that is gone at a write (done in `bb15b535`)
+
+The replace test on the second machine showed one new error line with the fourth commit, at 3 of 6 Machine deletes: "failed to remove the finalizer from PodVMMachine ...: not found". The delete was complete each time. Pushed at 21:02.
+
+- Cause: a reconcile reads the machine from the cache and writes to the API server. After the run that removes the finalizer, a second run can start from a cache that still shows the machine.
+- Each write to a `PodVMMachine` now ends the run with one info line when the machine does not exist: the finalizer add and removal, each status write, the address record, the provider ID, and the read of the reboot record.
+- A "not found" answer alone does not count. The API server gives the same answer for a resource that it does not serve. So the provider asks the API server for the object first (`controllers/gone.go:28`). The object is gone when it does not exist, or when another object with another UID has the name. A "not found" for a machine that exists stays an error.
+- Two more places of the same kind: the status write of a `PodVMCluster` (it has no finalizer), and the write of the Node provider ID when NVKE deleted the Node between the read and the write.
+- Left as an error on purpose: a "not found" at the create of a pod, a claim or a Secret copy. That means the pod namespace does not exist.
+- Tests: 74 test functions with 149 subtests. The mutation check has 47 rule breaks, and a named test fails for each. All checks of section 5 pass.
+- One limit that the agent names: a status write with no optimistic lock goes by name. If a machine is deleted and a new machine with the same name exists before a stale run writes, the write lands on the new machine. NVKE gives each Machine a new name.

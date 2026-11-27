@@ -1,0 +1,9 @@
+#!/bin/sh
+# ctr for the image build only. The CNI images package imports its images with
+# "ctr -n k8s.io images import -". A build container has no mount rights, so the import must not
+# unpack. containerd unpacks an image at its first use on the node.
+if [ "$3" = images ] && [ "$4" = import ]; then
+  shift 4
+  exec /usr/local/bin/ctr -n k8s.io images import --no-unpack "$@"
+fi
+exec /usr/local/bin/ctr "$@"
