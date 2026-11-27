@@ -1,6 +1,8 @@
-# Kata control plane lab, phase 0 and phase 1
+# Kata control plane lab, phase 0, phase 1 and phase 2
 
 Phase 1 is complete on 2026-11-26. Start with `results/phase1-results.md`.
+
+Phase 2 is in work. It replaces the lab parts of phase 1 with a Cluster API infrastructure provider that makes one Kata pod with two volumes for each Machine: `cluster-api-provider-podvm`, on the branch `feat/cluster-api-provider-podvm` of this fork. State on 2026-11-26: the provider makes a cluster from one request to NVKE (3 of 3 runs on a second test machine), a lost pod heals with no step by hand, and NVKE deletes the cluster through its API with no operator step. A node replace through the API and a rollout to a new image are the next tests.
 
 This folder is the record of a lab. The lab tests if one NVKE control plane node can run as one Kata pod: systemd, containerd, the kubelet and `nvke-agent` in the guest of a Kata VM, with the kubeadm static pods inside it. The pods run on a host cluster, and NVKE joins them as hosts that exist.
 
@@ -52,8 +54,10 @@ Phase 1 meets its pass rule. Its goal is a cluster that NVKE makes with three co
 | `lab/phase1-endpoint-run/` | Phase 1, step 7: the controller change to the branch image, the gate checks, two runs with the shared address, and the replace of the first node |
 | `lab/phase1-fixed-address/` | Phase 1, step 6: result files of the test with a fixed address and no NAT, from a second test machine (C1 the network, C2 the control plane with stock etcd settings, C3 pod traffic, D the NVKE controller) |
 | `lab/phase1-second-machine/` | The report, the scripts and the guest kernel config fragment of the second test machine: gate 4 across three host nodes, host node loss, and the fixed address tests. The address and the name of the machine are placeholders |
+| `lab/phase2-node-image/` | Phase 2, step 3: the node image for pods. An entry point, a small program with two units that applies the bootstrap data of NVKE, and the result of its four tests |
+| `lab/phase2-provider-run/` | Phase 2, steps 4 and 5: the first clusters through NVKE with the provider, the lost pod test and the delete with no operator step |
 | `lab/patches/` | Two patches to the Kata agent. The same commits are on the branch `lab/agent-kill-child-cgroups` of `github.com/dims/kata-containers` |
-| `results/` | The results of phase 0 and the source readings. `phase1-source-reading.md` has the NVKE source facts for phase 1. `phase1-endpoint-plan.md` and `phase1-endpoint-change.md` are the plan and the report for the request field `controlPlaneEndpoint` |
+| `results/` | The results of phase 0 and the source readings. `phase1-source-reading.md` has the NVKE source facts for phase 1. `phase1-endpoint-plan.md` and `phase1-endpoint-change.md` are the plan and the report for the request field `controlPlaneEndpoint`. `phase2-source-reading.md` has the source facts for the provider, and `phase2-provider-report.md` is the report of the provider module |
 
 Each gate folder has a `report.md` with the method, the versions, the numbers and what is not tested.
 

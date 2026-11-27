@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# A PodVMMachineTemplate for the lab of the second test machine.
+#
+# With the NVKE controller, send the object as infra.machineTemplate of the
+# control plane configuration. The NVKE controller renders one PodVMMachine
+# from it for each node and never applies the template itself.
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: PodVMMachineTemplate
+metadata:
+  name: kata-cp1-control-plane
+  namespace: nvke-system
+spec:
+  template:
+    spec:
+      # The node image for pods of one Kubernetes version. The name is an
+      # example: set the image that the lab loaded into its host nodes.
+      image: localhost/nvke/podvm-node:v1.36.4
+      # A host node of the lab cannot pull, so the image is loaded by hand.
+      imagePullPolicy: Never
+      resources:
+        cpu: "2"
+        memory: 6Gi
+      volumes:
+        # Both claims have the volume mode Block. The class must give a new
+        # volume to each new claim: a new Machine has a new name, so no
+        # volume can be bound to a claim name ahead of time.
+        var:
+          storageClassName: d-local-block
+          size: 20Gi
+        etcd:
+          storageClassName: d-local-block
+          size: 8Gi

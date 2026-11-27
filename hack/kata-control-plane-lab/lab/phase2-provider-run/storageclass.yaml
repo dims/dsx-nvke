@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The storage class of the lab for the block volumes of the pod VM provider.
+# No provisioner: the volumes are local PersistentVolume objects on loop devices of the lab machine
+# (storage.sh makes them). WaitForFirstConsumer: a claim binds when the scheduler places its pod, so
+# the two claims of a pod bind to volumes of one host node.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ${SC}
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain

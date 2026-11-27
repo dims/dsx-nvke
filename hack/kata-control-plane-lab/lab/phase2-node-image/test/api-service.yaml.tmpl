@@ -1,0 +1,18 @@
+# The shared API endpoint (the controlPlaneEndpoint of the request), as in block D, but with the
+# selector of the contract (section 5a): the two Cluster API labels that the provider puts on a
+# control plane pod. It sends traffic only to a pod that is ready (/readyz of its API server).
+apiVersion: v1
+kind: Service
+metadata:
+  name: cp-api
+  namespace: ${NS}
+  annotations: {metallb.io/loadBalancerIPs: "${IP_API}"}
+spec:
+  type: LoadBalancer
+  allocateLoadBalancerNodePorts: false
+  externalTrafficPolicy: ${ETP}
+  selector:
+    cluster.x-k8s.io/cluster-name: ${CLUSTER_NAME}
+    cluster.x-k8s.io/control-plane: ""
+  ports:
+    - {name: api, port: 6443, targetPort: 6443}

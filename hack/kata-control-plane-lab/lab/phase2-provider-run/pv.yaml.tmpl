@@ -1,0 +1,19 @@
+# One raw block volume: a loop device of the lab machine as a local PersistentVolume on one host
+# node. It has no claim reference, so the claim of any Machine can bind to it.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ${PV}
+  labels: {podvm.lab/host-node: "${HOST_NODE}", podvm.lab/use: "${USE}"}
+spec:
+  capacity: {storage: ${SIZE}}
+  volumeMode: Block
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ${SC}
+  local: {path: ${DEV}}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - {key: kubernetes.io/hostname, operator: In, values: ["${HOST_NODE}"]}

@@ -1,0 +1,19 @@
+# The bootstrap data of NVKE, part 1: the files (write_files of the cloud-config).
+# The provider mounts the data as /etc/podvm/bootstrap/value (design note, section 5a).
+# First start for a Machine: cloud-init status "running", the marker with the Machine name on
+# the /var volume, then each file. Later start for the same Machine: only a file that is absent.
+# The files are the SPIRE agent configuration and the agent settings, so this unit comes before
+# the two agent units.
+[Unit]
+Description=podvm: write the files of the NVKE bootstrap data
+After=local-fs.target
+Before=spire-agent.service nvke-agent.service podvm-bootstrap-final.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/run/podvm/env
+ExecStart=/usr/local/bin/podvm-bootstrap -phase files
+
+[Install]
+WantedBy=multi-user.target

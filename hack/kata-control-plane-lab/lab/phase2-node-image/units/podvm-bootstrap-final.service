@@ -1,0 +1,21 @@
+# The bootstrap data of NVKE, part 2: the commands (runcmd of the cloud-config), one time for a
+# Machine, then the cloud-init status "done", or "error" when a command fails.
+#
+# Why this is not part 1: the one command of NVKE is "systemctl restart nke-agent.service", and
+# that unit is ordered after multi-user.target. multi-user.target waits for a unit that it wants
+# and that is ordered before it, so a unit before the SPIRE agent cannot wait for that command.
+# cloud-init has the same two parts: write_files early, runcmd in cloud-final.service, which is
+# ordered after multi-user.target. The agent unit of the base image has the same order form.
+[Unit]
+Description=podvm: run the commands of the NVKE bootstrap data and set the cloud-init status
+Requires=podvm-bootstrap.service
+After=podvm-bootstrap.service multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/run/podvm/env
+ExecStart=/usr/local/bin/podvm-bootstrap -phase commands
+
+[Install]
+WantedBy=multi-user.target

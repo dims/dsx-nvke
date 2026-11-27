@@ -1,0 +1,49 @@
+# One pod in the form of the contract between the podvm provider and the node image
+# (design note, section 5a). t123.sh and t4.sh fill the ${...} variables.
+# Not in the contract, and marked below: the resource limits, the grace period, the service
+# account token and the service links.
+apiVersion: v1
+kind: Pod
+metadata:
+  # Pod name and hostname: the name of the Machine.
+  name: ${MACHINE}
+  namespace: ${NS}
+  labels:
+    cluster.x-k8s.io/cluster-name: ${CLUSTER}
+    cluster.x-k8s.io/control-plane: ""
+    # "A label with the machine name": the contract has no key for it. The lab uses this one.
+    podvm.infrastructure.cluster.x-k8s.io/machine-name: ${MACHINE}
+  annotations:
+    k8s.v1.cni.cncf.io/networks: '[{"name": "nodenet", "namespace": "${NS}", "ips": ["${ADDRESS}"], "mac": "${MAC}"}]'
+spec:
+  runtimeClassName: ${RUNTIME_CLASS}
+${EXTRA_SPEC}
+  containers:
+    - name: node
+      image: ${IMAGE}
+      # No command and no arguments: the entry point of the image runs.
+      securityContext:
+        privileged: true
+      env:
+        - {name: PODVM_MACHINE_NAME, value: "${MACHINE}"}
+        - {name: PODVM_NODE_ADDRESS, value: "${ADDRESS}"}
+        - {name: PODVM_NODE_INTERFACE, value: net1}
+      # Not in the contract. The Kata runtime sizes the guest from the limits.
+      resources:
+        limits: {cpu: "${CPU}", memory: ${MEMORY}}
+      readinessProbe:
+        httpGet: {path: /readyz, port: 6443, scheme: HTTPS}
+        periodSeconds: 2
+        failureThreshold: 1
+      volumeDevices:
+        - {name: var, devicePath: /dev/podvm-var}
+        - {name: etcd, devicePath: /dev/podvm-etcd}
+      volumeMounts:
+        - {name: bootstrap, mountPath: /etc/podvm/bootstrap, readOnly: true}
+  volumes:
+    - name: var
+      persistentVolumeClaim: {claimName: ${MACHINE}-var}
+    - name: etcd
+      persistentVolumeClaim: {claimName: ${MACHINE}-etcd}
+    - name: bootstrap
+      secret: {secretName: ${SECRET}}

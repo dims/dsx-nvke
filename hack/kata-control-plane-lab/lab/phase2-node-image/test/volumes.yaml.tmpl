@@ -1,0 +1,62 @@
+# Two raw block volumes for one Machine, and their claims. Each volume is a loop device of the
+# lab machine, offered as a local PersistentVolume on one host node. The claimRef binds a volume
+# to the claim of its Machine only. The claims stay when the pod goes.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ${NS}-${SLOT}-var
+spec:
+  capacity: {storage: 20Gi}
+  volumeMode: Block
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ${NS}-local-block
+  claimRef: {namespace: ${NS}, name: ${MACHINE}-var}
+  local: {path: ${VAR_LOOP}}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - {key: kubernetes.io/hostname, operator: In, values: ["${HOST_NODE}"]}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ${NS}-${SLOT}-etcd
+spec:
+  capacity: {storage: 8Gi}
+  volumeMode: Block
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ${NS}-local-block
+  claimRef: {namespace: ${NS}, name: ${MACHINE}-etcd}
+  local: {path: ${ETCD_LOOP}}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - {key: kubernetes.io/hostname, operator: In, values: ["${HOST_NODE}"]}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ${MACHINE}-var
+  namespace: ${NS}
+spec:
+  volumeMode: Block
+  accessModes: [ReadWriteOnce]
+  storageClassName: ${NS}-local-block
+  volumeName: ${NS}-${SLOT}-var
+  resources: {requests: {storage: 20Gi}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ${MACHINE}-etcd
+  namespace: ${NS}
+spec:
+  volumeMode: Block
+  accessModes: [ReadWriteOnce]
+  storageClassName: ${NS}-local-block
+  volumeName: ${NS}-${SLOT}-etcd
+  resources: {requests: {storage: 8Gi}}
