@@ -1,0 +1,41 @@
+# The node image for pods with ANOTHER Kubernetes version, for the upgrade test of the exit gate.
+# It is the form p5 with three binaries (kubeadm, kubelet, kubectl) and the control plane images
+# of one kindest/node image. Nothing else changes: the same agent, containerd, Open vSwitch, CNI.
+# The first stage reads the kindest/node image: it starts containerd in the build container and
+# exports the images that kubeadm of that version asks for. The build has no network.
+ARG KIND=kindest/node:v1.35.5
+ARG P5=nvke-node-podvm:bcc4376f-p5
+FROM ${KIND} AS kind
+RUN set -eu; \
+    containerd >/tmp/containerd.log 2>&1 & pid=$!; \
+    i=0; until ctr version >/dev/null 2>&1; do i=$((i + 1)); if [ "$i" -gt 30 ]; then cat /tmp/containerd.log; exit 1; fi; sleep 1; done; \
+    ctr -n k8s.io images ls -q | sort >/k8s-images-all.txt; sed 's/^/kind image: /' /k8s-images-all.txt; \
+    v=$(kubeadm version -o short); echo "kubeadm $v, $(kubelet --version)"; \
+    kubeadm config images list --kubernetes-version "$v" >/kubeadm-images.txt; sed 's/^/kubeadm asks for: /' /kubeadm-images.txt; \
+    names=$(grep -E '^registry.k8s.io/(kube-apiserver|kube-controller-manager|kube-scheduler|kube-proxy|etcd|coredns/coredns|pause):' /k8s-images-all.txt | tr '\n' ' '); \
+    echo "export: $names"; \
+    ctr -n k8s.io images export /k8s-images.tar $names; \
+    ls -la /k8s-images.tar; \
+    kill "$pid"; wait "$pid" || true
+FROM ${P5}
+ARG FORM=p5-k8s-old
+COPY --from=kind /usr/bin/kubeadm /usr/bin/kubeadm.real
+COPY --from=kind /usr/bin/kubelet /usr/bin/kubelet
+COPY --from=kind /usr/bin/kubectl /usr/bin/kubectl
+COPY --from=kind /kind/version /kind/version
+COPY --from=kind /k8s-images.tar /kubeadm-images.txt /tmp/k8s-old/
+# Images that kubeadm of that version asks for and the kindest/node image does not carry (the pause image).
+COPY images/ /tmp/k8s-old/images/
+RUN set -eu; \
+    containerd >/tmp/podvm-build-containerd.log 2>&1 & pid=$!; \
+    i=0; until ctr version >/dev/null 2>&1; do i=$((i + 1)); if [ "$i" -gt 30 ]; then cat /tmp/podvm-build-containerd.log; exit 1; fi; sleep 1; done; \
+    ctr -n k8s.io images import --no-unpack /tmp/k8s-old/k8s-images.tar; \
+    for f in /tmp/k8s-old/images/*.tar; do [ -e "$f" ] || continue; ctr -n k8s.io images import --no-unpack --platform linux/amd64 "$f"; done; \
+    ctr -n k8s.io images ls -q | sort >/tmp/k8s-old/now.txt; \
+    for i in $(cat /tmp/k8s-old/kubeadm-images.txt); do if grep -q -x "$i" /tmp/k8s-old/now.txt; then echo "present: $i"; else echo "MISSING: $i"; exit 1; fi; done; \
+    kill "$pid"; wait "$pid" || true; \
+    rm -rf /tmp/k8s-old /tmp/podvm-build-containerd.log /run/containerd; \
+    echo "${FORM}" >/usr/share/podvm/image-form; \
+    echo "kubeadm $(/usr/bin/kubeadm.real version -o short), $(kubelet --version), kubectl $(kubectl version --client 2>/dev/null | head -1), /kind/version $(cat /kind/version)"; \
+    ls -la /usr/bin/kubeadm /usr/bin/kubeadm.real | cut -c1-120
+LABEL podvm.image-form="${FORM}: p5 with kubeadm, kubelet, kubectl and the control plane images of another kindest/node image (upgrade test only)"

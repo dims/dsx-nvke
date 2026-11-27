@@ -1,8 +1,12 @@
 # Phase 2 results: a provider that runs NVKE control plane nodes as Kata pods
 
-State on 2026-11-26 at 23:25: all steps of phase 2 are done. All six pass rules are met, and one worker joins a cluster of the provider. Phase 2 is complete.
+State on 2026-11-27 at 01:11: all steps of phase 2 are done, and the flows of the plan's exit gate that the lab can run all pass. Two gaps of the design came out of them (findings 14 and 15).
 
 Design: `phase2-design.md`. Log: `runlog.md`. All tests ran on the second test machine, where Kata runs with nested virtualization, so times do not compare with the workstation. "Deduction" marks what is not tested.
+
+## Scope of "complete"
+
+Phase 2 is complete by the six pass rules of `phase2-design.md`, which Davanum accepted. The plan (`nvke-control-planes-as-kata-pods.md`) names a larger exit gate for this phase: "Rollout, repair, renewal, key rotation and upgrade pass in CI with Kata, then in DS9 QA". The lab tested all five flows on the second machine (section 1b). They did not run in CI and not on a QA site. NVKE has no etcd backup and restore at this commit, so that part of the plan's phase 2 work is not started.
 
 ## Answer
 
@@ -41,6 +45,26 @@ The worker flow of NVKE on this path, from the source and the runs:
 - A worker Machine has no failure domain, so the scheduler of the host cluster places its pod.
 - The default `systemReservedMemory` of a pool is 16Gi. A pod of 6Gi needs a smaller value in the request.
 - The node image for pods needs nothing different for a worker.
+
+## 1b. The flows of the plan's exit gate
+
+"Rollout, repair, renewal, key rotation and upgrade", each on a cluster of the provider with three control plane nodes and one worker (`lab/phase2-gate-run/result.md`). All 36 workflows of these tests completed.
+
+| Flow | Result | How it starts in NVKE |
+|---|---|---|
+| Rollout | Pass (pass rule 6): 489 s for three nodes | A PATCH of the machine template |
+| Repair | Pass (pass rule 5): about 190 s for one node | A DELETE of the node. It needs the desired count 4 first in a cluster with three nodes |
+| etcd encryption | Pass: 5 min 40 s. An old Secret is readable, a new one is stored encrypted | A PATCH with `enableEtcdEncryption: true` |
+| Key rotation | Pass: 5 min 38 s, no static pod restart, 357 of 357 calls to the shared address with 200 | An operator workflow in Temporal, with the command of the docs page. No API request |
+| Certificate renewal (forced) | Pass by its pass rules: 9 min 49 s, each certificate has a later end date. One finding (14) | An operator workflow in Temporal, with the command of the docs page. The schedule of NVKE renews only a certificate in its last 30 days |
+| Upgrade 1.35.5 to 1.36.4 | Pass at the end, with one stop (finding 15): each control plane node runs v1.36.4, the add-on step completes in 1 min 54 s. About 630 s without the stop | A PATCH with the version and the machine template in one request |
+
+- The kube-vip guard of NVKE runs in the encryption, the rotation and the renewal. The agent answers that kube-vip is not configured, and skips.
+- The provider sees no change of its pods in the encryption, the rotation and the renewal, and logs 0 error lines.
+- A node with v1.36.4 joined the cluster with v1.35.5 with no problem, and the workers with v1.35.5 stayed Ready during the upgrade.
+- The control plane upgrade does not touch a worker pool. A PATCH of the pool with the version, the template, `recycleBudget` 1 and `maxSurge` 1 makes one new worker. NVKE does not remove the old worker by itself.
+- The second node image for the upgrade is the pod image with the Kubernetes programs and images of the kind node image `v1.35.5`. It was built in 20 s. A full build of the base node image was not necessary.
+- etcd backup and restore: NVKE has no API request and no code for it at this commit. `docs/overview/preview-status.md:26` says "No backup or restore procedure".
 
 ## 2. What phase 2 made
 
@@ -103,6 +127,9 @@ New in phase 2. The findings of phase 1 are in `results/phase1-results.md`, sect
 11. **A lower count of a node pool removes no node.** The PATCH gives 200 and NVKE tears nothing down, by design (`controller/internal/controllers/nodeset/controller.go:148-158`). The caller deletes the node or the pool.
 12. **A new pod gives a node a new Open vSwitch system ID**, because the ID file is in `/etc` and not on the volume. The node then has a new OVN chassis ID, and the old chassis row stays in its own database for some minutes. Traffic passed in that time. The node image can keep the file on the volume.
 13. **The journal of the guest is in memory.** After a restart in place or a new pod the earlier lines of the agent are gone.
+14. **A cluster with a shared LoadBalancer address has nothing in the place of the kube-vip guard.** In the certificate renewal each control plane node has no etcd for about 80 s. In the stock design the guard takes the VIP away from that node first, so that the kubelets of the workers move to another API server. Here the agent finds no kube-vip and skips, and nothing moves the connections. Seen: the worker Node was NotReady two times (one time for about a minute), 6 of 593 calls to the shared address failed, and the provider logged three timeouts of 30 s. No pod was moved off the worker. The plan lists a "rollout guard with no kube-vip" as phase 2 work. It is not built.
+15. **A pending surge node of a rollout waits with no end on this path.** NVKE gives the surge Machine the failure domain of the node it replaces. When that domain has no room, NVKE has a rule that places the node again after 15 minutes, but it asks the provider client if the domain is out of capacity, and the client for a provider with a template always says no (`controller/internal/clients/capi/rotation.go:28-31`). In the lab the worker held the second volume place of that host node, and the upgrade waited 1006 s until the worker was moved through the API. A worker Machine has no failure domain, so the scheduler can put it on any host node.
+16. **Two flows of the exit gate have no API request**: the forced certificate renewal and the key rotation are operator workflows in Temporal.
 
 ## 5. What the lab still does in the place of a product part
 
@@ -120,7 +147,8 @@ New in phase 2. The findings of phase 1 are in `results/phase1-results.md`, sect
 - A control plane rollout while a worker holds the second volume place of a host node, and more than two workers.
 - A worker with no etcd volume. The provider and the image both need the volume today.
 - The loss of a host node with the provider, and a move of a pod to another host node with a real network volume.
-- A Kubernetes version change. Only the image changed in the rollout.
+- An upgrade with enough volume places from the start, an upgrade of a cluster with encryption on, and a scheduled renewal cycle.
+- A failed renewal or rotation and its recovery, and OIDC enablement, which uses the same guard.
 - Two clusters of the provider at one time, and the rule against overlapping address ranges in a cluster.
 - A pod that cannot be scheduled, a startup probe that does not pass in 20 minutes, a restart of the provider during a flow, a delete during provisioning.
 - The workstation, and a machine with no nested virtualization.
@@ -140,6 +168,8 @@ For a product form of the provider (not planned and not estimated yet):
 2. A place in the repository for the node image for pods, and the guest kernel as a release part.
 3. What reacts to the loss of a host node, together with the volume kind.
 4. Workers on bare metal in the same cluster: one cluster has exactly one provider today.
-5. The smaller provider points from the tests: take the pod out of the shared Service at the start of a delete, a shorter time limit for the look at the Node of the new cluster, tolerations and a node selector, an etcd volume only for control plane machines (the provider API and the entry point of the image both need it today).
-6. The smaller image points: the Open vSwitch system ID on the volume, and a place for the journal that stays through a new pod.
-7. The setting `NODE_REBOOT_SOFT_REBOOT_ENABLED=false` in a deployment with this provider.
+5. A guard for the shared address in the place of the kube-vip guard (finding 14), and a capacity answer of the provider for a pending surge node (finding 15).
+6. etcd backup and restore, which the plan lists for this phase and NVKE does not have.
+7. The smaller provider points from the tests: take the pod out of the shared Service at the start of a delete, a shorter time limit for the look at the Node of the new cluster, tolerations and a node selector, an etcd volume only for control plane machines (the provider API and the entry point of the image both need it today).
+8. The smaller image points: the Open vSwitch system ID on the volume, and a place for the journal that stays through a new pod.
+9. The setting `NODE_REBOOT_SOFT_REBOOT_ENABLED=false` in a deployment with this provider.
