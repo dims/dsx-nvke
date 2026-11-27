@@ -179,9 +179,11 @@ func (s *NodeAgentServer) StartKubeVipRestore(
 //  3. removes the VIP from loopback,
 //  4. verifies a quiet window with no new remote VIP sockets.
 //
-// When kube-vip is not configured, the VIP withdrawal steps are skipped. In both
-// cases it optionally removes the kube-apiserver static pod manifest and waits
-// for it to exit.
+// When kube-vip is not configured, the VIP withdrawal steps are skipped. When a
+// control plane endpoint gate is configured, the node is first withdrawn from
+// the load balancer that reads the gate; see
+// withdrawThroughControlPlaneEndpointGate. In every case it optionally removes
+// the kube-apiserver static pod manifest and waits for it to exit.
 func (s *NodeAgentServer) runK8sControlPlaneNodeGracefulShutdown(
 	ctx context.Context,
 	progress nodeAgentOperationProgress,
@@ -225,12 +227,27 @@ func (s *NodeAgentServer) runK8sControlPlaneNodeGracefulShutdown(
 // can put back exactly that rather than working it out again afterwards. The
 // withdrawal destroys the evidence: it parks the manifest and deletes the
 // address from lo, which are two of the three things the address resolves from.
+//
+// A node can also sit behind a load balancer it does not run, and the control
+// plane endpoint gate is how it leaves that one. The two are independent: each
+// runs when it is configured, so a node with both leaves both, and a node with
+// neither is left as it is. The gate goes first because closing it disturbs
+// nothing until its settle time has passed, and a gate that fails then stops
+// the withdrawal with kube-vip untouched. The gate is not part of what this
+// reports: the gate file itself records who closed it, and the restore reads
+// that.
 func (s *NodeAgentServer) withdrawKubeVipLocked(
 	ctx context.Context,
 	runner nvkeutils.CommandRunner,
 	progress nodeAgentOperationProgress,
 	parkDir string,
 ) (kubeVipWithdrawal, error) {
+	if s.ControlPlaneEndpointGate.configured() {
+		if err := s.withdrawThroughControlPlaneEndpointGate(ctx, runner, progress, parkDir); err != nil {
+			return kubeVipWithdrawal{}, err
+		}
+	}
+
 	progress.SetStep(stepResolvingKubeVip)
 	vip, fromManifest, err := s.resolveKubeVipAddressFromManifest(parkDir)
 	if err != nil {
@@ -331,7 +348,8 @@ func (s *NodeAgentServer) withdrawKubeVip(
 // has to be back by other means before this is called. When kube-vip is not
 // configured on this node (mirroring the withdrawal-side skip in
 // runK8sControlPlaneNodeGracefulShutdown), there is nothing to restore and this
-// is a no-op.
+// is a no-op. It also opens the control plane endpoint gate, when one is
+// configured and closed.
 //
 // That precondition used to be documented and trusted. It is now verified: the
 // apiserver readiness wait below is the same /readyz kube-vip itself polls, so
@@ -375,6 +393,29 @@ func (s *NodeAgentServer) runKubeVipRestore(
 //
 // sync.Mutex is not reentrant, so this split is what keeps the bundled sequence
 // from deadlocking on itself.
+//
+// It puts back kube-vip and then opens the control plane endpoint gate, the
+// reverse of the order the withdrawal took them in. Both are attempted and the
+// errors are collected, for the reason returnEtcdDefragNodeToService gives: a
+// gate left closed over a kube-vip problem is one more thing a human has to
+// undo. Opening the gate early is safe in the way restoring kube-vip early is,
+// because the load balancer's health check also asks the local apiserver
+// whether it is ready.
+func (s *NodeAgentServer) restoreKubeVipLocked(
+	ctx context.Context,
+	runner nvkeutils.CommandRunner,
+	progress nodeAgentOperationProgress,
+	parkDir string,
+	withdrawn kubeVipWithdrawal,
+) error {
+	return errors.Join(
+		s.restoreKubeVip(ctx, runner, progress, parkDir, withdrawn),
+		s.openControlPlaneEndpointGate(progress, parkDir),
+	)
+}
+
+// restoreKubeVip is the kube-vip half of restoreKubeVipLocked.
+//
 // withdrawn describes a withdrawal performed earlier in this same call, and is
 // the zero value when there was none - the standalone restore RPC and the
 // startup reconciler both arrive that way and re-resolve, which works for them
@@ -385,7 +426,7 @@ func (s *NodeAgentServer) runKubeVipRestore(
 // would be nothing left to find, and the restore would quietly decide kube-vip
 // was not configured and skip - leaving the node out of the VIP while the
 // operation reported success.
-func (s *NodeAgentServer) restoreKubeVipLocked(
+func (s *NodeAgentServer) restoreKubeVip(
 	ctx context.Context,
 	runner nvkeutils.CommandRunner,
 	progress nodeAgentOperationProgress,
@@ -782,9 +823,15 @@ func (s *NodeAgentServer) restartStaticPodContainer(
 // start from its own unmodified manifest is not something the agent can fix, so
 // the node stays down either way; what this guarantees is that it stays down
 // deliberately rather than being handed back by the next restart.
+//
+// A control plane endpoint gate the defragmentation closed is handed over with
+// them. StartKubeVipRestore opens it.
 func (s *NodeAgentServer) handOffParkedManifestsToCaller() error {
 	var moved []string
 	var errs []error
+	if err := s.handOffControlPlaneEndpointGateToCaller(); err != nil {
+		errs = append(errs, err)
+	}
 	for _, manifestName := range []string{defaultKubeAPIServerManifestName, defaultKubeVipManifestName} {
 		src := s.rootedPath(filepath.Join(defaultEtcdDefragParkDir, manifestName))
 		dst := s.rootedPath(filepath.Join(defaultStaticPodBackupDir, manifestName))

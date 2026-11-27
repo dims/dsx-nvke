@@ -182,7 +182,8 @@ Temporal failure/cancellation/timeout and mismatched/absent cluster ownership as
 unresolved until inspected.
 
 The workflow processes one control-plane node at a time. It drains/restores
-kube-vip where present and restarts etcd, API server, controller-manager and
+kube-vip where present, closes and opens the control plane endpoint gate on a
+node whose agent has one, and restarts etcd, API server, controller-manager and
 scheduler individually with health checks between components and nodes. V1-only
 agents are rejected by the capability-distinct V2 start RPC; V2 can select its
 embedded receipt-aware compatibility executor. Do not start the legacy

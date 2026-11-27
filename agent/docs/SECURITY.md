@@ -16,7 +16,8 @@ The service:
 - initializes, joins, resets, and inspects Kubernetes nodes through `kubeadm`;
 - installs NVKE bundles, Debian packages, apt repositories, and CNI components;
 - configures Kubernetes API/etcd encryption and rotates encryption keys;
-- changes control-plane static pod manifests and kube-vip state;
+- changes control-plane static pod manifests, kube-vip state and the control
+  plane endpoint gate;
 - uploads files, executes scripts, and collects support bundles.
 
 The implemented API is defined in `pkg/agent/proto/node_agent.proto`. The
@@ -138,9 +139,9 @@ credentials immediately.
 ### 6. Unsafe or inconsistent control-plane mutation
 
 Interrupted or incorrectly ordered operations affecting
-`encryption-config.yaml`, kube-apiserver static pod manifests, kube-vip, or etcd
-object rewrites could reduce availability or leave data readable with an old
-key. Supplying different encryption keys to control-plane nodes could make
+`encryption-config.yaml`, kube-apiserver static pod manifests, kube-vip, the
+control plane endpoint gate, or etcd object rewrites could reduce availability
+or leave data readable with an old key. Supplying different encryption keys to control-plane nodes could make
 cluster data unavailable.
 
 The newer implementations use operation IDs, persisted status, serialized

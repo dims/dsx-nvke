@@ -234,6 +234,11 @@ type NodeAgentServer struct {
 	// etcdCallTimeout bounds a single etcd API call, so an unreachable member
 	// cannot block a call indefinitely. Zero means the production default.
 	etcdCallTimeout time.Duration
+
+	// ControlPlaneEndpointGate is the health gate that takes this node out of a
+	// control-plane load balancer the node does not run. The zero value means
+	// there is no gate.
+	ControlPlaneEndpointGate ControlPlaneEndpointGate
 }
 
 // Real implementations

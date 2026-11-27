@@ -26,6 +26,8 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
+
+	server "github.com/dsx-ai-factory/nvke/agent/internal/agent"
 )
 
 type writerFunc func([]byte) (int, error)
@@ -413,6 +415,95 @@ func TestControllerClientCABundleName(t *testing.T) {
 			if got := *bundle; got != tc.want {
 				t.Fatalf("controller client CA bundle = %q, want %q", got, tc.want)
 			}
+		})
+	}
+}
+
+// The first case is the flag text of the pod node image, as it stands in
+// AGENT_ARGS.
+func TestControlPlaneEndpointGateFlags(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    server.ControlPlaneEndpointGate
+		wantErr string
+	}{
+		{
+			name: "gate file, backend interface and settle time",
+			args: strings.Fields("--control-plane-endpoint-gate-file /var/lib/nvke/control-plane-endpoint.gate " +
+				"--control-plane-endpoint-backend-interface eth0 --control-plane-endpoint-gate-settle 10s"),
+			want: server.ControlPlaneEndpointGate{
+				File:             "/var/lib/nvke/control-plane-endpoint.gate",
+				BackendInterface: "eth0",
+				Settle:           10 * time.Second,
+			},
+		},
+		{
+			name: "no gate flag means no gate",
+			want: server.ControlPlaneEndpointGate{Settle: server.DefaultControlPlaneEndpointGateSettle},
+		},
+		{
+			name: "a settle time alone means no gate",
+			args: []string{"--control-plane-endpoint-gate-settle=30s"},
+			want: server.ControlPlaneEndpointGate{Settle: 30 * time.Second},
+		},
+		{
+			name: "the settle time defaults to 10 seconds",
+			args: []string{"--control-plane-endpoint-gate-file=/run/gate", "--control-plane-endpoint-backend-interface=eth0"},
+			want: server.ControlPlaneEndpointGate{File: "/run/gate", BackendInterface: "eth0", Settle: 10 * time.Second},
+		},
+		{
+			name: "a settle time of zero closes the sockets at once",
+			args: []string{
+				"--control-plane-endpoint-gate-file=/run/gate",
+				"--control-plane-endpoint-backend-interface=eth0",
+				"--control-plane-endpoint-gate-settle=0",
+			},
+			want: server.ControlPlaneEndpointGate{File: "/run/gate", BackendInterface: "eth0"},
+		},
+		{
+			name:    "a gate file needs a backend interface",
+			args:    []string{"--control-plane-endpoint-gate-file=/run/gate"},
+			wantErr: "--control-plane-endpoint-gate-file requires --control-plane-endpoint-backend-interface",
+		},
+		{
+			name:    "a backend interface needs a gate file",
+			args:    []string{"--control-plane-endpoint-backend-interface=eth0"},
+			wantErr: "--control-plane-endpoint-backend-interface requires --control-plane-endpoint-gate-file",
+		},
+		{
+			name:    "a gate file must be an absolute path",
+			args:    []string{"--control-plane-endpoint-gate-file=gate", "--control-plane-endpoint-backend-interface=eth0"},
+			wantErr: `--control-plane-endpoint-gate-file must be an absolute path, got "gate"`,
+		},
+		{
+			name: "a settle time must not be negative",
+			args: []string{
+				"--control-plane-endpoint-gate-file=/run/gate",
+				"--control-plane-endpoint-backend-interface=eth0",
+				"--control-plane-endpoint-gate-settle=-1s",
+			},
+			wantErr: "--control-plane-endpoint-gate-settle must not be negative",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := flag.NewFlagSet("agent", flag.ContinueOnError)
+			fs.SetOutput(io.Discard)
+			gate := registerControlPlaneEndpointGateFlags(fs)
+			require.NoError(t, fs.Parse(tc.args))
+
+			got := gate()
+			err := validateEndpointGateConfig(got)
+
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }

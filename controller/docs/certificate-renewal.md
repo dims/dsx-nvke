@@ -83,11 +83,23 @@ cancellation on a disconnected context before the node's postflight. A drain
 failure stops the cycle before any renewal is dispatched. A restore failure
 fails the cycle for that node even if renewal succeeded, and the message
 records it; it does not retain the cluster mutation lock, which only tracks
-unconfirmed renewal work. Nodes without kube-vip skip the drain. A cluster with
+unconfirmed renewal work. A cluster with
 a single control-plane node is renewed without the drain, since there is no
 other node for workers to fail over to. An agent that predates the drain RPCs
 (`Unimplemented`) fails the cycle, as it does for the etcd-encryption and OIDC
 rollouts, so upgrade such agents before renewal.
+
+What the drain does on a node depends on how clients reach that node. A node
+that runs kube-vip leaves the VIP as described above. A node behind a load
+balancer that it does not run, such as a Service of another cluster, has no
+kube-vip. When its node agent is started with a
+[control plane endpoint gate](../../agent/README.md#control-plane-endpoint-gate),
+the drain closes the gate: the load balancer's health check fails for the node,
+the agent closes the established connections that came through the load
+balancer, and it verifies that no new one arrives before the apiserver
+restarts. The restore opens the gate. A node with kube-vip and a gate does both.
+A node with neither skips the drain, and worker kubelets whose connection is on
+that node can go NotReady while its apiserver restarts.
 
 Renewal supports clusters with one or with three or more control-plane nodes.
 Two etcd voters cannot lose one, so a cluster with exactly two control-plane
@@ -272,7 +284,9 @@ Hand off sanitized evidence, without credentials or kubeconfigs:
 - each node's runbook phase file, receipts and any manifest left in
   `/etc/kubernetes/nvke-cert-renewal-manifests/` or
   `/etc/kubernetes/nvke-cert-renewal-staging/`;
-- the kube-vip manifest state and the API and VIP health observed per node.
+- the kube-vip manifest state and the API and VIP health observed per node;
+- on a node with a control plane endpoint gate, whether the gate file exists
+  and its content.
 
 Any proposal to release the cycle must account for every earlier attempt and
 for unfinished guard work. An empty reservation, a terminal agent response or a

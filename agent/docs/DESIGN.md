@@ -35,7 +35,9 @@ API.**
   providers, key rotation, and object rewrite, all coordinated across control-plane
   nodes.
 - **Control-plane graceful shutdown / kube-vip withdrawal & restore** — stop this
-  node serving the control-plane VIP without disrupting cluster availability.
+  node serving the control-plane VIP without disrupting cluster availability. A
+  node behind a load balancer that it does not run leaves it through the control
+  plane endpoint gate.
 - **Node introspection & support** — status, node info, support-bundle collection,
   arbitrary (audited) script execution, file upload.
 
@@ -147,7 +149,7 @@ Entry point: `cmd/agent/main.go`.
 
 1. **Flag/config parse** → `AgentConfig` (listen port, bundle source URL, index
    URL, CNI image registry, mTLS toggle, SPIFFE socket, audit/script log paths,
-   mlx5 rescan toggle).
+   mlx5 rescan toggle, control plane endpoint gate).
 2. **Logger setup** — three JSON `slog` loggers: default (stdout), **audit**
    (`/var/log/nvke-agent-audit.log` and stdout for journald), **script execution**
    (`/var/log/nvke-execute-scripts.log`).
@@ -405,6 +407,20 @@ ARP/BGP-ECMP paths that would strand worker kubelets) → optionally stop kube-a
 `StartKubeVipRestore` reverses only the kube-vip move (never apiserver), waits for
 the VIP back on `lo`. Manifest moves are the control mechanism (kubelet reacts to
 `/etc/kubernetes/manifests` changes); restore verifies backup hashes for idempotence.
+
+A node behind a load balancer that it does not run has no kube-vip, and the steps
+above are skipped there. With `--control-plane-endpoint-gate-file` set, the same
+withdrawal first takes the node out of that load balancer
+(`withdrawThroughControlPlaneEndpointGate`): resolve the IPv4 address of the
+backend interface → close the gate (create the gate file, which the load
+balancer's health check reads) → wait the settle time → close established remote
+`backend:6443` sockets (`ss -K`) → **verify the same quiet window** on the backend
+address. The restore opens the gate (removes the file). The etcd defragmentation
+and the startup reconciler use the same two calls, so they get the gate too. The
+gate file names the park directory of the flow that closed it, which decides who
+opens it, as the park directory does for a manifest. See
+[README.md](../README.md#control-plane-endpoint-gate) for what the deployment has
+to provide.
 
 ### 9.5 Bundles / packages / collections
 - **Bundles:** semver-versioned tgz artifacts resolved through an index
