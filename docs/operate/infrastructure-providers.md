@@ -72,6 +72,10 @@ Adding a provider is a change to NVKE, not configuration. It needs a Cluster API
 
 To propose a provider, open an issue in the `dsx-ai-factory/nvke` repository.
 
+## When a failure domain has no room
+
+A Cluster API infrastructure provider that you use through `infra` can report that a failure domain has no room for a machine. The provider sets the `Ready` condition of its infrastructure machine to `False` with the reason `FailureDomainUnavailable`. Cluster API copies that condition to the `InfrastructureReady` condition of the `Machine`, and NVKE reads it there. When a control-plane node has been pending for more than 15 minutes and still has that reason, and the cluster has another failure domain to place it in, NVKE deletes the node, creates a new one in another failure domain, and avoids the first failure domain for 3 hours. The cluster must have `controlPlaneVIP`, unless the development-only `allowControlPlaneWithoutVIP` setting is on. The condition message becomes the node's `pending` message. With any other reason, the node waits where it is.
+
 ## Check providers and their clusters
 
 `nvkectl get providers` lists each provider with its state, read from the management cluster. `CONFIGURED` means the provider's CRDs are established, its controller is available and its credentials Secret exists. The provider pages describe the other states.

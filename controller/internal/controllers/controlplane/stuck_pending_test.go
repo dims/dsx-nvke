@@ -111,6 +111,25 @@ func TestPlaceableDomains(t *testing.T) {
 	}
 }
 
+// expectReplace sets up the database calls of a re-place. It returns where the
+// mark of the failure domain and the delete request of the node land.
+func expectReplace(mockTx *testutil.MockTx, cluster db.Cluster, stuck db.Node) (*db.Cluster, *db.Node) {
+	marked, written := &db.Cluster{}, &db.Node{}
+	mockTx.On("GetCluster", mock.Anything, cluster.ID).Return(cluster, nil)
+	mockTx.On("UpdateCluster", mock.Anything, mock.MatchedBy(func(c *db.Cluster) bool {
+		*marked = *c
+		return true
+	})).Return(cluster, nil)
+	mockTx.On("GetNode", mock.Anything, stuck.ID).Return(stuck, nil)
+	mockTx.On("GetClusterForUpdate", mock.Anything, cluster.ID).Return(cluster, nil)
+	mockTx.On("GetNodeForUpdate", mock.Anything, stuck.ID).Return(stuck, nil)
+	mockTx.On("UpdateNode", mock.Anything, mock.MatchedBy(func(n *db.Node) bool {
+		*written = *n
+		return true
+	})).Return(stuck, nil)
+	return marked, written
+}
+
 func TestReconcileStuckPendingNodes_ReplacesAndMarksDomain(t *testing.T) {
 	t.Parallel()
 
@@ -123,20 +142,7 @@ func TestReconcileStuckPendingNodes_ReplacesAndMarksDomain(t *testing.T) {
 	healthyC.FailureDomain = "C"
 
 	mockTx := &testutil.MockTx{}
-	mockTx.On("GetCluster", mock.Anything, clusterID).Return(cluster, nil)
-	var marked db.Cluster
-	mockTx.On("UpdateCluster", mock.Anything, mock.MatchedBy(func(c *db.Cluster) bool {
-		marked = *c
-		return true
-	})).Return(cluster, nil)
-	mockTx.On("GetNode", mock.Anything, stuck.ID).Return(stuck, nil)
-	mockTx.On("GetClusterForUpdate", mock.Anything, clusterID).Return(cluster, nil)
-	mockTx.On("GetNodeForUpdate", mock.Anything, stuck.ID).Return(stuck, nil)
-	var written db.Node
-	mockTx.On("UpdateNode", mock.Anything, mock.MatchedBy(func(n *db.Node) bool {
-		written = *n
-		return true
-	})).Return(stuck, nil)
+	marked, written := expectReplace(mockTx, cluster, stuck)
 
 	r := &reconciler{db: mockTx, logger: slog.Default(), k8sClient: capiMachinesClient(t, stuck.Name)}
 	cp := &controlPlane{
@@ -150,7 +156,7 @@ func TestReconcileStuckPendingNodes_ReplacesAndMarksDomain(t *testing.T) {
 
 	assert.True(t, acted)
 	assert.Equal(t, stuck.ID, written.ID)
-	assert.True(t, nodes.IsDeleteRequested(written))
+	assert.True(t, nodes.IsDeleteRequested(*written))
 	assert.Contains(t, marked.Conditions.UnplaceableFailureDomains, "A")
 }
 
@@ -224,4 +230,51 @@ func TestReconcileStuckPendingNodes_NoOps(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, acted)
 	})
+}
+
+// A template-backed provider's placement failure is read from the Machine alone:
+// Cluster API mirrors the infrastructure machine's Ready condition into the
+// Machine's InfrastructureReady condition, and its reason is the whole signal.
+// This test runs the client of the cluster's provider, not a stub.
+func TestReconcileStuckPendingNodes_TemplateProviderReason(t *testing.T) {
+	t.Parallel()
+
+	clusterID := uuid.New()
+	cluster := db.Cluster{
+		ID: clusterID, Name: "test-cluster", ProviderType: db.ProviderTypeCAPI, ControlPlaneVIP: "10.0.0.1",
+		ControlPlaneConfig: db.ControlPlaneConfig{DesiredCount: 3},
+	}
+	stuck := stuckPendingNode(clusterID, "cp-stuck", 2*time.Hour)
+	healthyB := healthyCPNode(clusterID, "cp-b", time.Now().Add(-5*time.Hour))
+	healthyB.FailureDomain = "B"
+
+	scheme := runtime.NewScheme()
+	require.NoError(t, clusterv1.AddToScheme(scheme))
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&clusterv1.Machine{
+		ObjectMeta: metav1.ObjectMeta{Name: stuck.Name, Namespace: config.Config{}.ManagementNamespaceOrDefault()},
+		Status: clusterv1.MachineStatus{Conditions: []metav1.Condition{{
+			Type:               clusterv1.MachineInfrastructureReadyCondition,
+			Status:             metav1.ConditionFalse,
+			Reason:             "FailureDomainUnavailable",
+			LastTransitionTime: metav1.Now(),
+		}}},
+	}).Build()
+
+	mockTx := &testutil.MockTx{}
+	marked, written := expectReplace(mockTx, cluster, stuck)
+	machines, err := clients.GetMachineMaterialization(cluster)
+	require.NoError(t, err)
+	r := &reconciler{db: mockTx, logger: slog.Default(), k8sClient: k8sClient}
+	cp := &controlPlane{
+		nodes:                     []db.Node{stuck, healthyB},
+		clusterControlPlaneConfig: cluster.ControlPlaneConfig,
+		failureDomains:            &failureDomains{eligible: []string{"A", "B"}},
+	}
+
+	acted, err := r.reconcileStuckPendingNodes(context.Background(), cluster, cp, machines)
+	require.NoError(t, err)
+
+	assert.True(t, acted)
+	assert.True(t, nodes.IsDeleteRequested(*written))
+	assert.Contains(t, marked.Conditions.UnplaceableFailureDomains, "A")
 }
