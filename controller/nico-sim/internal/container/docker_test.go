@@ -4,6 +4,10 @@
 package container
 
 import (
+	"context"
+	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,6 +95,117 @@ func TestUnit_DecodeCloudConfigContent(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("decodeCloudConfigContent() = %q, want %q", got, tt.want)
 			}
+		})
+	}
+}
+
+// docker start returns before systemd in the node can take commands. The
+// runner must not start earlier, and a node whose systemd never comes up must
+// fail the create. The fake Docker command records each call it gets and finds
+// the control socket from a chosen check on.
+func TestUnit_ApplyCloudConfig_WaitsForSystemd(t *testing.T) {
+	type parameters struct {
+		readyAtCheck int           // first check that finds the control socket; 0 is never
+		checkExit    int           // exit code of the check itself; non-zero is a Docker failure
+		timeout      time.Duration // limit of the wait
+		cancelInWait bool          // end the caller's context once the first check ran
+		wantCalls    []string      // every recorded call, where the number of checks is fixed
+		wantErr      string
+		wantErrIs    error
+	}
+	tests := map[string]parameters{
+		"systemd ready at once": {
+			readyAtCheck: 1, timeout: time.Minute,
+			wantCalls: []string{"status running", "check", "runner"},
+		},
+		"systemd ready after some checks": {
+			readyAtCheck: 3, timeout: time.Minute,
+			wantCalls: []string{"status running", "check", "check", "check", "runner"},
+		},
+		"systemd never ready": {
+			timeout: 300 * time.Millisecond,
+			wantErr: "systemd in container node did not open its control socket /run/systemd/private within 300ms",
+		},
+		"context ends during the wait": {
+			timeout: time.Minute, cancelInWait: true,
+			wantErr: "wait for systemd in container node", wantErrIs: context.Canceled,
+		},
+		"check fails in Docker": {
+			checkExit: 1, timeout: time.Minute,
+			wantCalls: []string{"status running", "check", "status error"},
+			wantErr:   "check systemd in container node",
+		},
+	}
+	for name, params := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			calls := filepath.Join(dir, "calls")
+			docker := filepath.Join(dir, "docker")
+			fakeDocker := fmt.Sprintf(`#!/bin/sh
+calls='%s'
+case "$1 $2" in
+  'exec --detach') echo runner >>"$calls"; exit 0 ;;
+  'exec -i') cat >/dev/null; exit 0 ;;
+esac
+if [ "$6" = cloud-init-status ]; then
+  echo "status $7" >>"$calls"
+  exit 0
+fi
+case "$5" in
+  *'%s'*)
+    checks=0
+    if [ -f "$calls.checks" ]; then read -r checks <"$calls.checks"; fi
+    checks=$((checks + 1))
+    echo "$checks" >"$calls.checks"
+    echo check >>"$calls"
+    if [ %d -ne 0 ]; then echo 'container is not running' >&2; exit %d; fi
+    if [ %d -gt 0 ] && [ "$checks" -ge %d ]; then echo ready; else echo waiting; fi
+    ;;
+esac
+`, calls, systemdControlSocketPath, params.checkExit, params.checkExit, params.readyAtCheck, params.readyAtCheck)
+			require.NoError(t, os.WriteFile(docker, []byte(fakeDocker), 0o755))
+			service := &Service{
+				cfg:                  Config{DockerBinary: docker},
+				logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
+				systemdReadyTimeout:  params.timeout,
+				systemdReadyInterval: 10 * time.Millisecond,
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if params.cancelInWait {
+				go func() {
+					for ctx.Err() == nil {
+						if recorded, _ := os.ReadFile(calls); strings.Contains(string(recorded), "check\n") {
+							cancel()
+							return
+						}
+						time.Sleep(time.Millisecond)
+					}
+				}()
+			}
+
+			err := service.applyCloudConfig(ctx, "node", "#cloud-config\nruncmd:\n  - systemctl restart nke-agent.service\n")
+
+			recorded, readErr := os.ReadFile(calls)
+			require.NoError(t, readErr)
+			got := strings.Split(strings.TrimSpace(string(recorded)), "\n")
+			if params.wantErr == "" {
+				require.NoError(t, err)
+				require.Equal(t, params.wantCalls, got)
+				return
+			}
+			require.ErrorContains(t, err, params.wantErr)
+			if params.wantErrIs != nil {
+				require.ErrorIs(t, err, params.wantErrIs)
+			}
+			if params.wantCalls != nil {
+				require.Equal(t, params.wantCalls, got)
+				return
+			}
+			require.Equal(t, "status running", got[0])
+			require.Contains(t, got, "check")
+			require.NotContains(t, got, "runner")
+			require.Equal(t, "status error", got[len(got)-1])
 		})
 	}
 }

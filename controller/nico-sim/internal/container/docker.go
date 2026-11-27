@@ -23,6 +23,16 @@ const (
 	mockCloudInitStatusPath = "/var/lib/nico-containers/cloud-init/status"
 	mockCloudInitScriptPath = "/var/lib/nico-containers/cloud-init/runcmd.sh"
 	statusUpdateTimeout     = 5 * time.Second
+
+	// systemctl run as root reaches systemd through this socket. systemd makes
+	// it while it starts, some time after docker start has returned.
+	systemdControlSocketPath = "/run/systemd/private"
+	systemdReadyProbe        = "if [ -S " + systemdControlSocketPath + " ]; then echo ready; else echo waiting; fi"
+	// A healthy node opens the socket within about a second of docker start.
+	// The limit only ends the wait for a node whose systemd never comes up, and
+	// it stays far inside the time the API handler allows a create.
+	defaultSystemdReadyTimeout  = 60 * time.Second
+	defaultSystemdReadyInterval = 100 * time.Millisecond
 )
 
 type cloudConfig struct {
@@ -189,12 +199,52 @@ func (s *Service) applyCloudConfig(ctx context.Context, containerID, userData st
 	if err := s.copyFileToContainer(ctx, containerID, mockCloudInitScriptPath, cloudConfigScript(cfg.RunCmd)); err != nil {
 		return fmt.Errorf("write cloud-init runner: %w", err)
 	}
+	// On a real node cloud-init runs runcmd from a systemd unit, so a command
+	// never finds systemd unreachable. Here docker start returns before systemd
+	// is up, and a systemctl call that loses that race leaves the status at
+	// error for the life of the container.
+	if err := s.waitForSystemd(ctx, containerID); err != nil {
+		return err
+	}
 	// The node owns cloud-init, just as it does on NICo. A blocking runcmd must
 	// not hold the create response; removing the container stops it naturally.
 	if _, err := s.runDocker(ctx, "exec", "--detach", containerID, "sh", mockCloudInitScriptPath, mockCloudInitStatusPath); err != nil {
 		return fmt.Errorf("start cloud-init runner: %w", err)
 	}
 	return nil
+}
+
+// waitForSystemd blocks until systemd in the container has opened its control
+// socket, which is what a systemctl call in runcmd needs. It gives up after
+// s.systemdReadyTimeout, and the caller then fails the create instead of
+// running commands that cannot reach systemd.
+func (s *Service) waitForSystemd(ctx context.Context, containerID string) error {
+	waitCtx, cancel := context.WithTimeout(ctx, s.systemdReadyTimeout)
+	defer cancel()
+
+	started := time.Now()
+	for checks := 1; ; checks++ {
+		out, err := s.execInContainerOutput(waitCtx, containerID, "sh", "-c", systemdReadyProbe)
+		switch {
+		case err == nil && out == "ready":
+			s.logger.Info("systemd is ready for cloud-init commands",
+				"container_id", containerID, "checks", checks, "waited", time.Since(started).Round(time.Millisecond))
+			return nil
+		case err != nil && waitCtx.Err() == nil:
+			// The probe always exits 0, so this is Docker or the container failing.
+			return fmt.Errorf("check systemd in container %s: %w", containerID, err)
+		}
+
+		select {
+		case <-waitCtx.Done():
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("wait for systemd in container %s: %w", containerID, err)
+			}
+			return fmt.Errorf("systemd in container %s did not open its control socket %s within %s",
+				containerID, systemdControlSocketPath, s.systemdReadyTimeout)
+		case <-time.After(s.systemdReadyInterval):
+		}
+	}
 }
 
 func cloudConfigScript(commands []string) string {
