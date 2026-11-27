@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	yaml "gopkg.in/yaml.v2"
+	sigsyaml "sigs.k8s.io/yaml"
 
 	"github.com/dsx-ai-factory/nvke/agent/internal/k8s"
 	pb "github.com/dsx-ai-factory/nvke/agent/pkg/agent/proto"
@@ -53,6 +54,29 @@ const (
 	kubectlNamespaceFlag = "-n"
 	kubectlOutputFlag    = "-o"
 	kubectlGetCommand    = "get"
+
+	kubeadmAPIVersionV1beta3 = "kubeadm.k8s.io/v1beta3"
+	kubeadmAPIVersionV1beta4 = "kubeadm.k8s.io/v1beta4"
+
+	// The kube-apiserver settings that the NVKE controller renders into the kubeadm
+	// ClusterConfiguration of a cluster created with encryption. A control-plane node that joins
+	// later builds its kube-apiserver manifest from that document, so a cluster that gets
+	// encryption later must end with the same settings. The volume name must stay equal to the
+	// controller's: two volumes for one mount path make the kube-apiserver pod invalid.
+	apiEncryptionConfigDir   = "/etc/kubernetes/kube-api-encryption"
+	apiEncryptionConfigFlag  = "encryption-provider-config"
+	apiEncryptionConfigFile  = apiEncryptionConfigDir + "/encryption-config.yaml"
+	apiEncryptionReloadFlag  = "encryption-provider-config-automatic-reload"
+	apiEncryptionReloadValue = "true"
+	apiEncryptionVolumeName  = "enc"
+
+	// The key that names an entry of extraArgs (v1beta4) and of extraVolumes.
+	kubeadmEntryNameKey = "name"
+
+	// Earlier agent versions wrote a volume for this file. Nothing creates the file, so the
+	// kubelet refuses to start a kube-apiserver pod that mounts it.
+	legacyAPIEncryptionVolumeName = "encryption-config"
+	legacyAPIEncryptionHostPath   = "/etc/kubernetes/encryption-config.yaml"
 )
 
 type (
@@ -886,6 +910,8 @@ func (n *NodeAgentServer) verifyNodeAPIEncryptionEnabled() (bool, error) {
 	return false, nil
 }
 
+// updateEncryptionEntryForKubeadmConfigMap records API encryption in the kubeadm-config ConfigMap,
+// so that a control-plane node that joins later gets a kube-apiserver with the same settings.
 func (n *NodeAgentServer) updateEncryptionEntryForKubeadmConfigMap() error {
 	cm, err := k8s.GetConfigMap(context.Background(), kubeSystemNamespace, kubeadmConfigMapName)
 	if err != nil {
@@ -898,38 +924,13 @@ func (n *NodeAgentServer) updateEncryptionEntryForKubeadmConfigMap() error {
 		return errors.New("kubeadm-config configmap not found")
 	}
 
-	clusterYAML := cm.Data["ClusterConfiguration"]
-
-	var configMap map[string]any
-	if err := yaml.Unmarshal([]byte(clusterYAML), &configMap); err != nil {
-		log.Printf("error unmarshaling kubeadm config: %v", err)
-		return err
-	}
-
-	// Ensure apiServer entry exists
-	apiServer, ok := configMap["apiServer"].(map[string]any)
-	if !ok {
-		apiServer = make(map[string]any)
-		configMap["apiServer"] = apiServer
-	}
-
-	apiServer["extraVolumes"] = []any{
-		map[string]any{
-			"hostPath":  "/etc/kubernetes/encryption-config.yaml",
-			"mountPath": "/etc/kubernetes/encryption-config.yaml",
-			"name":      "encryption-config",
-			"pathType":  "File",
-			"readOnly":  true,
-		},
-	}
-
-	modifiedYAML, err := yaml.Marshal(configMap)
+	merged, err := mergeEncryptionIntoClusterConfiguration(cm.Data["ClusterConfiguration"])
 	if err != nil {
-		log.Printf("error marshaling kubeadm config: %v", err)
+		slog.Error("failed to merge API encryption into the kubeadm ClusterConfiguration", "err", err)
 		return err
 	}
 
-	cm.Data["ClusterConfiguration"] = string(modifiedYAML)
+	cm.Data["ClusterConfiguration"] = merged
 
 	err = k8s.UpdateConfigMap(context.Background(), kubeSystemNamespace, cm)
 	if err != nil {
@@ -938,6 +939,106 @@ func (n *NodeAgentServer) updateEncryptionEntryForKubeadmConfigMap() error {
 	}
 
 	return nil
+}
+
+// mergeEncryptionIntoClusterConfiguration returns the kubeadm ClusterConfiguration with the
+// kube-apiserver encryption flags and the encryption config volume. Every other setting stays as
+// it is, because kubeadm join and kubeadm upgrade build the kube-apiserver manifest from the
+// whole apiServer section. The volume that earlier agent versions wrote is removed.
+func mergeEncryptionIntoClusterConfiguration(clusterYAML string) (string, error) {
+	var config map[string]any
+	if err := sigsyaml.Unmarshal([]byte(clusterYAML), &config); err != nil {
+		return "", fmt.Errorf("parsing kubeadm ClusterConfiguration: %w", err)
+	}
+
+	// The version decides the shape of extraArgs, so an unknown version is not rewritten.
+	apiVersion, _ := config["apiVersion"].(string)
+	if apiVersion != kubeadmAPIVersionV1beta3 && apiVersion != kubeadmAPIVersionV1beta4 {
+		return "", fmt.Errorf("unsupported kubeadm ClusterConfiguration apiVersion %q", apiVersion)
+	}
+
+	apiServer, err := clusterConfigurationField[map[string]any](config, "apiServer")
+	if err != nil {
+		return "", err
+	}
+	if apiServer == nil {
+		apiServer = map[string]any{}
+	}
+	config["apiServer"] = apiServer
+
+	if apiVersion == kubeadmAPIVersionV1beta3 {
+		args, err := clusterConfigurationField[map[string]any](apiServer, "extraArgs")
+		if err != nil {
+			return "", err
+		}
+		if args == nil {
+			args = map[string]any{}
+		}
+		args[apiEncryptionConfigFlag] = apiEncryptionConfigFile
+		args[apiEncryptionReloadFlag] = apiEncryptionReloadValue
+		apiServer["extraArgs"] = args
+	} else {
+		args, err := clusterConfigurationField[[]any](apiServer, "extraArgs")
+		if err != nil {
+			return "", err
+		}
+		args = upsertNamedEntry(args, map[string]any{kubeadmEntryNameKey: apiEncryptionConfigFlag, "value": apiEncryptionConfigFile})
+		args = upsertNamedEntry(args, map[string]any{kubeadmEntryNameKey: apiEncryptionReloadFlag, "value": apiEncryptionReloadValue})
+		apiServer["extraArgs"] = args
+	}
+
+	volumes, err := clusterConfigurationField[[]any](apiServer, "extraVolumes")
+	if err != nil {
+		return "", err
+	}
+	kept := make([]any, 0, len(volumes)+1)
+	for _, volume := range volumes {
+		mount, ok := volume.(map[string]any)
+		if ok && mount[kubeadmEntryNameKey] == legacyAPIEncryptionVolumeName && mount["hostPath"] == legacyAPIEncryptionHostPath {
+			continue
+		}
+		kept = append(kept, volume)
+	}
+	// The directory, not the file: a key rotation replaces the file, and a file mount would keep the old one.
+	apiServer["extraVolumes"] = upsertNamedEntry(kept, map[string]any{
+		kubeadmEntryNameKey: apiEncryptionVolumeName,
+		"hostPath":          apiEncryptionConfigDir,
+		"mountPath":         apiEncryptionConfigDir,
+		"pathType":          "DirectoryOrCreate",
+		"readOnly":          true,
+	})
+
+	merged, err := sigsyaml.Marshal(config)
+	if err != nil {
+		return "", fmt.Errorf("serializing kubeadm ClusterConfiguration: %w", err)
+	}
+	return string(merged), nil
+}
+
+// clusterConfigurationField returns parent[key] as T. A missing or null key gives the zero value.
+// A value of another type is an error, so a document of an unknown shape is never rewritten.
+func clusterConfigurationField[T any](parent map[string]any, key string) (T, error) {
+	var zero T
+	value := parent[key]
+	if value == nil {
+		return zero, nil
+	}
+	typed, ok := value.(T)
+	if !ok {
+		return zero, fmt.Errorf("kubeadm ClusterConfiguration field %q has unexpected type %T", key, value)
+	}
+	return typed, nil
+}
+
+// upsertNamedEntry replaces the entry that has the name of desired, or appends desired.
+func upsertNamedEntry(entries []any, desired map[string]any) []any {
+	for i, entry := range entries {
+		if named, ok := entry.(map[string]any); ok && named[kubeadmEntryNameKey] == desired[kubeadmEntryNameKey] {
+			entries[i] = desired
+			return entries
+		}
+	}
+	return append(entries, desired)
 }
 
 // labelAPIEncryptionNode writes the new key and prunes its legacy counterpart.
