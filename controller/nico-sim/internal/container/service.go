@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	nicosdk "github.com/NVIDIA/infra-controller/rest-api/sdk/standard"
 
@@ -111,6 +112,10 @@ func (c Config) validate() error {
 type Service struct {
 	cfg    Config
 	logger *slog.Logger
+	// How long, and how often, a create checks for systemd before it starts the
+	// simulated cloud-init commands. Tests shorten both.
+	systemdReadyTimeout  time.Duration
+	systemdReadyInterval time.Duration
 }
 
 func New(cfg Config, logger *slog.Logger) (*Service, error) {
@@ -119,8 +124,10 @@ func New(cfg Config, logger *slog.Logger) (*Service, error) {
 		return nil, err
 	}
 	return &Service{
-		cfg:    cfg,
-		logger: logger.With("component", "nico-containers"),
+		cfg:                  cfg,
+		logger:               logger.With("component", "nico-containers"),
+		systemdReadyTimeout:  defaultSystemdReadyTimeout,
+		systemdReadyInterval: defaultSystemdReadyInterval,
 	}, nil
 }
 

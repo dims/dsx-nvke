@@ -71,15 +71,23 @@ case "$1" in
     if [ "$2" = --detach ]; then
       exit 0
     fi
+    case "$5" in
+      *'%s'*) echo ready; exit 0 ;;
+    esac
     if [ "$3" = sh ] && [ "$4" = -lc ] && [ "$5" = 'block-until-release' ]; then
       while [ ! -f '%s' ]; do sleep 0.01; done
     fi
     cat >/dev/null
     ;;
 esac
-`, inspect, release)
+`, inspect, systemdControlSocketPath, release)
 	require.NoError(t, os.WriteFile(docker, []byte(fakeDocker), 0o755))
-	service := &Service{cfg: Config{DockerBinary: docker, NodeNetwork: "kind", SiteID: "site", VPCID: "vpc", TenantID: "tenant"}}
+	service := &Service{
+		cfg:                  Config{DockerBinary: docker, NodeNetwork: "kind", SiteID: "site", VPCID: "vpc", TenantID: "tenant"},
+		logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
+		systemdReadyTimeout:  defaultSystemdReadyTimeout,
+		systemdReadyInterval: defaultSystemdReadyInterval,
+	}
 	req := &nicosdk.InstanceCreateRequest{}
 	req.SetUserData("#cloud-config\nruncmd:\n  - block-until-release\n")
 	type result struct {

@@ -361,12 +361,21 @@ parts required by node bootstrap:
    `/var/lib/nico-containers/cloud-init/status`.
 2. It parses `write_files` entries, creates their parent directories, writes
    their contents, and applies optional permissions and ownership.
-3. It starts a detached runner inside the container, which runs each `runcmd`
+3. It waits until systemd in the container has opened its control socket,
+   `/run/systemd/private`, for at most 60 seconds.
+4. It starts a detached runner inside the container, which runs each `runcmd`
    string in order with `sh -lc`. Creation returns without waiting for these commands.
-4. It writes `done`, or `error` when parsing or execution fails. Command output
+5. It writes `done`, or `error` when parsing or execution fails. Command output
    is saved in `/var/lib/nico-containers/cloud-init/output.log`.
 
 The runner survives simulator restarts. Deleting the node container stops it.
+
+`docker start` returns before systemd in the container is up. On a real node
+cloud-init runs `runcmd` from a systemd unit, so a `systemctl` call in `runcmd`
+always reaches systemd, and the wait in step 3 gives a container node the same
+guarantee. Without it such a call can fail, and nothing runs the commands
+again, so the status stays `error`. If the socket does not appear in time, the
+create fails, the container is removed, and the caller can create it again.
 
 The node image replaces `cloud-init` with a small status shim. Calling
 `cloud-init status` reads that file and prints the normal `status: running`,
