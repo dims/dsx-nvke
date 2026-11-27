@@ -64,7 +64,8 @@ The worker flow of NVKE on this path, from the source and the runs:
 - A node with v1.36.4 joined the cluster with v1.35.5 with no problem, and the workers with v1.35.5 stayed Ready during the upgrade.
 - The control plane upgrade does not touch a worker pool. A PATCH of the pool with the version, the template, `recycleBudget` 1 and `maxSurge` 1 makes one new worker. NVKE does not remove the old worker by itself.
 - The second node image for the upgrade is the pod image with the Kubernetes programs and images of the kind node image `v1.35.5`. It was built in 20 s. A full build of the base node image was not necessary.
-- etcd backup and restore: NVKE has no API request and no code for it at this commit. `docs/overview/preview-status.md:26` says "No backup or restore procedure".
+- etcd backup and restore: the NVKE controller and the node agent have no API request, no workflow and no code for it at this commit. `docs/overview/preview-status.md:26` says "No backup or restore procedure" for the management cluster.
+  - Correction of 2026-11-27, 10:45: the earlier text said only "NVKE has no API request and no code". It left out a bundle. `docs/concepts.md:108` names `etcd-manager` "for compaction and snapshots", and the sample bundle index of the agent lists a bundle with that name (`agent/samples/index.json`, `agent/samples/collection-example.json`). The source of the bundle is not in the repository. The lab did not install it and did not test it. So the lab cannot say what that bundle does for a backup.
 
 ## 2. What phase 2 made
 
@@ -169,7 +170,7 @@ For a product form of the provider (not planned and not estimated yet):
 3. What reacts to the loss of a host node, together with the volume kind.
 4. Workers on bare metal in the same cluster: one cluster has exactly one provider today.
 5. A guard for the shared address in the place of the kube-vip guard (finding 14), and a capacity answer of the provider for a pending surge node (finding 15).
-6. etcd backup and restore, which the plan lists for this phase and NVKE does not have.
+6. etcd backup and restore, which the plan lists for this phase. The controller and the agent have no request and no code for it. The bundle `etcd-manager`, which the docs name for snapshots, is not in the repository and not tested in the lab (section 1b).
 7. The smaller provider points from the tests: take the pod out of the shared Service at the start of a delete, a shorter time limit for the look at the Node of the new cluster, tolerations and a node selector, an etcd volume only for control plane machines (the provider API and the entry point of the image both need it today).
 8. The smaller image points: the Open vSwitch system ID on the volume, and a place for the journal that stays through a new pod.
 9. The setting `NODE_REBOOT_SOFT_REBOOT_ENABLED=false` in a deployment with this provider.

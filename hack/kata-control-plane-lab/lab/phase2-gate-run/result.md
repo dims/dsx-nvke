@@ -214,8 +214,9 @@ No flow of NVKE failed. Each of the 36 workflows of this task completed (1 `Enab
 - No code: the controller and the agent have no `etcdctl snapshot`, no `etcdutl` and no restore step. The agent has etcd defragmentation, health, status, member removal and encryption (`agent/internal/agent/etcd_*.go`).
 - The docs say it: "No backup or restore procedure. NVKE provides no procedure to back up or restore the management cluster or the management plane's state" (`docs/overview/preview-status.md:26`). The key rotation page asks the operator for "an established backup/recovery process" of his own and tells him to keep the key Secret with his etcd backups (`controller/docs/etcd-encryption-key-rotation.md:73-83`).
 - One page says the opposite in one line: "etcd operations, managed by NVKE with built-in encryption and `etcd-manager` for compaction and snapshots" (`docs/concepts.md:108`). The name `etcd-manager` is nowhere else in the source.
+  - Correction by the main session, 2026-11-27, 10:45: the name is in the sample bundle index of the agent (`agent/samples/index.json`, `agent/samples/index_v2.json`, `agent/samples/collection-example.json`), as a bundle that the agent can install. The source of the bundle is not in the repository. The lab did not install it and did not test it.
 
-So the plan is right: NVKE has no etcd backup and no restore.
+So the plan is right for the controller and the agent: they have no etcd backup and no restore. What the bundle `etcd-manager` does is not known from this repository.
 
 ## 9. Not tested
 

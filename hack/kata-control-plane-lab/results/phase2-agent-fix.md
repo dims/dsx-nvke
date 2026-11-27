@@ -7,7 +7,7 @@ Date: 2026-11-26, 20:32 to 20:59 local time. An agent wrote the fix and ran the 
 - Worktree: `/scratch/kata-cp/src/nvke-agentfix`. Logs: `/scratch/kata-cp/logs/phase2-agentfix/`.
 - No pull request. The commit has a sign-off, no GPG signature and no agent text.
 - No change of the gRPC API, no new dependency.
-- Not tested yet in a cluster. The test with a node image that has the new agent runs on the second machine.
+- Tested in a cluster on the second machine, 2026-11-27 02:02 to 03:00 UTC (`lab/phase2-agentfix-run/result.md`). The replace of the first node and the rollout pass with this agent. All 10 `JoinNode` workflows completed at the first attempt. Section 5 has the points that are still open.
 
 The main session chose the place of the fix (the NVKE agent, and not the node image) by the standing rules of Davanum, and told him. He can change it.
 
@@ -89,10 +89,16 @@ A check with real kubeadm 1.36.4 and no cluster (the program came out of the loc
 
 ## 5. Not verified
 
+The cluster test of 2026-11-27 (`lab/phase2-agentfix-run/result.md`) verified these points, which were open when the fix was written:
+
 - The step against a live API server on a node with its node address on a second interface, with this build.
-- The kubectl read of the ConfigMap on a real node, and the write to `/var/lib/nvke` by the agent.
-- A full join after the init node is deleted.
-- A kubeadm other than 1.36.4. The v1beta3 path has a unit test only.
+- The kubectl read of the ConfigMap on a real node, and the write to `/var/lib/nvke` by the agent. The file has 3022 bytes and mode 600.
+- A full join after the init node is deleted, also when the controller has no kept join strings and asks a joined node.
+
+Still not verified:
+
+- The agent log line of the fix with a kubeadm other than 1.36.4. The upgrade test made a cluster with kubeadm 1.35.5 and this agent, and its joins passed (`lab/phase2-gate-run/result.md`). Nobody read the log line in that cluster.
+- The v1beta3 path. It has a unit test only.
 - Two calls at one time. The mutex has no test.
 - arm64.
 
