@@ -28,9 +28,9 @@ The lab settled the following parts:
 - **Storage.** Each pod has two raw block volumes, one for `/var` and one for the etcd data. A new Machine gets empty volumes.
 - **Placement.** The provider publishes one failure domain for each host node, and it places each pod in the failure domain that NVKE chose.
 
-We propose the following parts, and they have no test result yet:
+The lab also tested the following two parts, with prototypes of the changes in the agent and in the controller:
 
-- **Health gate.** The node agent gets a second way to withdraw a node before an operation, for an endpoint that the node does not run. The agent closes a gate that the health check of the load balancer reads, and then closes the open connections of remote clients. With no gate configured, the agent behaves as today.
+- **Health gate.** The node agent gets a second way to withdraw a node before an operation, for an endpoint that the node does not run. The agent closes a gate that the health check of the load balancer reads, waits a settle time, closes the open connections of remote clients, and checks that no new connection arrives. With no gate configured, the agent behaves as today. For a pod, the health check is the readiness probe, so the probe runs a program in the guest that reads the gate.
 - **Capacity signal.** An infrastructure machine reports the condition `Ready` as `False` with the reason `FailureDomainUnavailable` when its provider cannot place it in the failure domain of its Machine. The client for template-backed providers reads that reason, so the rule that moves a pending control plane node to another failure domain applies.
 
 ## Consequences
@@ -40,11 +40,11 @@ A workload cluster needs no dedicated bare-metal machines for its control plane,
 The decision makes the following parts harder:
 
 - **Host cluster.** The host cluster must supply a secondary network that gives a pod an interface with the address and the hardware address from the pod specification, a storage driver that gives a new raw block volume to each claim, and a load balancer for the endpoint. The lab used lab parts for all three.
-- **Guest kernel.** The stock Kata guest kernel has no Open vSwitch and no Geneve, so the kernel datapath of the pod network needs a guest kernel build for each Kata release. Upstream Kata does not test a kubelet in the guest, and the lab needed two changes to the Kata agent.
+- **Guest kernel.** The stock Kata guest kernel has no Open vSwitch and no Geneve, so the kernel datapath of the pod network needs a guest kernel build for each Kata release. The guest kernel of the lab also had no socket diagnostics, so `ss -K`, which the agent uses to close the connections of remote clients, closed nothing and reported no error until the kernel got those options. Upstream Kata does not test a kubelet in the guest, and the lab needed two changes to the Kata agent.
 - **Node image.** The node image of the pods has no place in the repository yet, because `os-image/` builds a QCOW2 only.
 - **Agent.** The agent can no longer assume that the node address is on the interface of the default route. Today it gives kubeadm a config for the `upload-certs` phase only on the node that ran `kubeadm init`, so with the node address on a second interface no new control plane node can join after that node is gone.
-- **Operations on a node.** A pod has no kube-vip, so the kube-vip guard does nothing. Until the health gate exists, an operation that stops etcd or the API server on a node does not move client connections away first. In the lab, 6 of 593 calls to the endpoint failed during a forced certificate renewal.
-- **Rollout.** A rollout puts its surge node in the failure domain of the node that it replaces. When that host node has no room, the surge node waits with no end until the capacity signal exists, and an upgrade in the lab waited 1006 s until an operator made room.
+- **Operations on a node.** A pod has no kube-vip, so the kube-vip guard does nothing, and an operation that stops etcd or the API server on a node does not move client connections away first. In the lab, 6 of 593 calls to the endpoint failed during a forced certificate renewal, and a worker node was not ready two times. With the health gate, 510 of 510 calls passed and the worker stayed ready. The gate adds about 40 s to the guard of each node, and the readiness probe becomes a program that runs in the guest every 2 s.
+- **Rollout.** A rollout puts its surge node in the failure domain of the node that it replaces. When that host node has no room and the provider gives no signal, the surge node waits with no end, and an upgrade in the lab waited 1006 s until an operator made room. With the capacity signal, the rule that exists moved the node to another failure domain after its 15 minutes, and the rollout ended by itself with two control plane nodes on one host node. Nothing moves a node back.
 
 The decision gives up the following:
 
