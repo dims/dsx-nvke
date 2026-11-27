@@ -115,12 +115,15 @@ func TestMachineReconcilerMakesThePodOfTheContract(t *testing.T) {
 		"podvm.infrastructure.cluster.x-k8s.io/owner-uid":       "uid-" + testMachineName,
 	}, pod.Labels)
 
-	// The readiness probe of a control plane machine. One slow answer must
-	// not take the pod out of the shared Service: the probe waits 3 seconds
-	// for an answer, and the pod is out after 3 failures in a row.
+	// The readiness probe of a control plane machine runs a program of the
+	// node image in the container. The program reads the endpoint gate of
+	// the node and /readyz of the local API server, so a call from outside
+	// the guest cannot take its place. One slow answer must not take the pod
+	// out of the shared Service: the probe waits 3 seconds for an answer, and
+	// the pod is out after 3 failures in a row.
 	require.Equal(t, &corev1.Probe{
-		ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
-			Path: "/readyz", Port: intstr.FromInt32(6443), Scheme: corev1.URISchemeHTTPS,
+		ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{
+			Command: []string{"/usr/local/bin/podvm-endpoint-ready"},
 		}},
 		PeriodSeconds:    2,
 		TimeoutSeconds:   3,

@@ -156,7 +156,7 @@ This is the contract with the node image. The image side is not in this module.
 | Hardware address | `02:00` and the four bytes of the address. `172.28.1.21` gives `02:00:ac:1c:01:15` |
 | Labels | `cluster.x-k8s.io/cluster-name`, `cluster.x-k8s.io/control-plane` when the Machine has it, `podvm.infrastructure.cluster.x-k8s.io/machine-name`, and three labels that name the owner `PodVMMachine` |
 | Startup probe | For each machine: a TCP connection to port 15005 (`nvke-agent`), each 2 seconds, for at most 20 minutes |
-| Readiness probe | For a control plane machine: HTTPS GET `/readyz` on port 6443, each 2 seconds, with 3 seconds for an answer. The pod is out after 3 failures in a row |
+| Readiness probe | For a control plane machine: the program `/usr/local/bin/podvm-endpoint-ready` of the node image, run in the container `node`, each 2 seconds, with 3 seconds for an answer. The pod is out after 3 failures in a row |
 | Grace period | 20 seconds for a pod that is deleted |
 | Provider ID | `podvm://<pod-namespace>/<pod-name>` |
 
@@ -165,6 +165,20 @@ The pod has no token of the host cluster and no service links.
 A Service of the caller can select the first two labels to get one shared
 endpoint for the API servers. Only a pod with a ready API server is behind it.
 The provider does not make that Service.
+
+The readiness probe is the health check of that Service. It runs the program
+`podvm-endpoint-ready` in the guest, and the node image must have it. The
+program passes when both of these are true:
+
+- The endpoint gate file of the node does not exist.
+- `/readyz` of the local API server answers 200.
+
+The node agent writes the gate file before an operation that restarts the API
+server, and removes it after the operation. So the Service stops new connections
+to a node while its API server still answers. A call from the kubelet to port
+6443 cannot see the gate, which is why the probe runs a program and makes no
+HTTPS call. The provider does not know the path of the gate file: the node image
+sets it for the program and for the node agent.
 
 The readiness probe takes a pod out of that Service after about 6 seconds of
 failed answers, and after about 9 seconds when each probe runs into its time

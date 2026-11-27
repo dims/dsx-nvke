@@ -62,9 +62,17 @@ const (
 	startupPeriodSeconds    = 2
 	startupFailureThreshold = 600
 
-	// apiServerPort and apiServerReadyPath describe the readiness probe of a
-	// control plane pod. A Service of the caller then sends traffic only to a
-	// pod whose API server is ready.
+	// endpointReadyCommand is the program of the node image that the readiness
+	// probe of a control plane pod runs in the container. It passes when the
+	// endpoint gate file of the node does not exist and /readyz of the local
+	// API server answers 200. A Service of the caller then sends traffic only
+	// to a pod whose API server is ready and whose node is not withdrawn.
+	//
+	// The node agent closes the gate before an operation that restarts the
+	// API server and opens it after the operation. The probe is the health
+	// check of the shared Service, so the gate takes the node out of the
+	// Service while the API server still answers. A call from the kubelet to
+	// port 6443 cannot see the gate, so the probe runs a program in the guest.
 	//
 	// The probe runs each 2 seconds, waits 3 seconds for an answer, and takes
 	// a pod out after 3 failures in a row. So a pod is out after about 6
@@ -73,8 +81,7 @@ const (
 	// a time limit of 1 second and one failure, a slow disk took all three
 	// pods of a control plane out at one time, and the shared address refused
 	// every call.
-	apiServerPort             = 6443
-	apiServerReadyPath        = "/readyz"
+	endpointReadyCommand      = "/usr/local/bin/podvm-endpoint-ready"
 	readinessPeriodSeconds    = 2
 	readinessTimeoutSeconds   = 3
 	readinessFailureThreshold = 3
@@ -466,10 +473,8 @@ func buildPod(
 	}
 	if isControlPlane {
 		container.ReadinessProbe = &corev1.Probe{
-			ProbeHandler: corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{
-				Path:   apiServerReadyPath,
-				Port:   intstr.FromInt32(apiServerPort),
-				Scheme: corev1.URISchemeHTTPS,
+			ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{
+				Command: []string{endpointReadyCommand},
 			}},
 			PeriodSeconds:    readinessPeriodSeconds,
 			TimeoutSeconds:   readinessTimeoutSeconds,
