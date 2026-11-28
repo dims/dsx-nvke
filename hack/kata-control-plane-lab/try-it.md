@@ -275,7 +275,7 @@ kc get nodes -o wide
 ```
 
 - **Pass.** The Service `podvm-example-control-plane` has the external address `172.28.255.220`. Three pods run, each on another kind worker. The cluster has the status `Provisioned`. `kc get nodes` shows three control plane nodes and one worker, each Ready. No other step by hand. The status `Provisioned` comes when the first control plane node is up. The other nodes join after that, so run the last command again until it shows four nodes.
-- **Time.** In the first run the Service had its address after 11 s, the status `Provisioned` came after 3 min 29 s, and the last of the four nodes was Ready after 5 min 37 s. A second cluster in the same run took 12 s, 3 min 21 s and 5 min 12 s.
+- **Time.** In the first run the Service had its address after 11 s, the status `Provisioned` came after 3 min 29 s, and the last of the four nodes was Ready after 5 min 37 s. Two more clusters in the same run took 12 s, 3 min 21 s and 5 min 12 s, and 11 s, 3 min 26 s and 6 min 7 s.
 - **If not.** `kh -n nvke-system get podvmclusters,podvmmachines` shows the reason of the provider. For a pod that stays Pending, run `kh -n podvm-clusters describe pod <name>`. For a node that does not join, read `kh -n nvke-controller logs deployment/nvke-controller`.
 
 ### Scenario 2, pod traffic between the nodes
