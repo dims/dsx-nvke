@@ -229,7 +229,8 @@ server, and removes it after the operation. So the Service stops new connections
 to a node while its API server still answers. A call from the kubelet to port
 6443 cannot see the gate, which is why the probe runs a program and makes no
 HTTPS call. The provider does not know the path of the gate file: the node image
-sets it for the program and for the node agent.
+sets it for the program and for the node agent. The gate needs a node agent
+that has it, see [What the NVKE controller needs](#what-the-nvke-controller-needs).
 
 The readiness probe takes a pod out of that Service after about 6 seconds of
 failed answers, and after about 9 seconds when each probe runs into its time
@@ -275,7 +276,9 @@ node that never ran waits for 15 minutes with that reason, and the cluster has
 another failure domain, the NVKE controller deletes the node and makes a new
 one in another failure domain. It then does not use the first failure domain
 for 3 hours. It also shows the message as the pending message of the node. The
-provider sets this reason for no other state.
+provider sets this reason for no other state. The move needs an NVKE controller
+that reads the reason, see
+[What the NVKE controller needs](#what-the-nvke-controller-needs).
 
 The new node can land on a host node that already has a control plane node of
 the cluster, because the spread rule of the pods is a preference.
@@ -420,29 +423,143 @@ placeholder for a value of your site.
 A test checks each object of the provider against the schema of its generated
 CRD, and that the five files name each other.
 
+## What the NVKE controller needs
+
+The chart values that the NVKE controller needs for this provider are in
+[Pod VM](../docs/site-bootstrap/infrastructure-providers.md#pod-vm) of the
+infrastructure providers page: the `infra` provider, the rights for the three
+kinds, node attestation with a join token, and the reboot setting.
+
+Three behaviors on this page are not part of the provider. Each one is a change
+of the NVKE controller or of the node agent with its own review. In a build that
+does not have the change, the behavior is absent.
+
+| Behavior | Needs | Without it |
+|---|---|---|
+| The cluster request takes `controlPlaneEndpoint` | An NVKE controller with that request field | The endpoint of a cluster is the address of its first control plane node, and the control plane Service is not used |
+| The node agent writes the endpoint gate file | A node agent with the endpoint gate, and a node image that tells it the gate file | The readiness probe follows `/readyz` only, so a node leaves the Service when its API server stops and not before |
+| The NVKE controller moves a control plane node that waits with `FailureDomainUnavailable` | An NVKE controller that reads this reason for a provider on the `infra` path | The NVKE controller shows the message, and the node waits |
+
 ## Install
 
-Build the image and render the clusterctl artifacts from the repository root:
+### What the host cluster needs
+
+- Cluster API core that serves `cluster.x-k8s.io/v1beta2`.
+- A Kata RuntimeClass. Its guest kernel must have what a node of the new
+  cluster uses: Open vSwitch and Geneve for the pod network, and socket
+  diagnostics with the destroy operation, which the node agent uses to close
+  the connections of a node.
+- A Kata agent that can run a program in a container in which systemd runs.
+  The readiness probe of a control plane pod is such a call. With Kata
+  Containers 4.4.0 the call fails without a change of the agent, and then no
+  control plane pod gets ready.
+- Multus, and a NetworkAttachmentDefinition that takes the address and the
+  hardware address from the pod annotation. See
+  [The node network](#the-node-network).
+- A storage class for block volumes. See
+  [The block volumes](#the-block-volumes).
+- A pod namespace that allows privileged pods. The container `node` is
+  privileged.
+- For the control plane Service: a load balancer for Services of the type
+  `LoadBalancer` that can give a fixed address.
+
+### The node network
+
+Each pod has a second interface, `net1`, on the node network. Its address is
+the address of the node. The NVKE controller calls the node agent there, and it
+sets the same address as the node address of the kubelet and as the advertise
+address of the API server.
+
+The network attachment must take the address and the hardware address from the
+pod annotation. For the bridge plugin that is the capabilities `ips` and `mac`
+with the static address plugin, as in the
+[sample](config/samples/networkattachmentdefinition.yaml). The sample sets no
+gateway and no masquerade, so the default route of a pod stays on its first
+interface.
+
+The node network must connect these, with no address translation between them:
+
+- The pods of one cluster on all host nodes. A bridge that is not connected
+  between the host nodes joins only the pods of one host node.
+- Each worker of the cluster. The control plane nodes and the workers call each
+  other at their node addresses, and the pod network of the cluster runs
+  between these addresses.
+- The NVKE controller, which calls port 15005 of each node address.
+
+On `net1` a pod has the prefix length of the node network,
+`addressRange.prefixLength`. So it reaches each address of the node network
+directly, and the sample gives it no route there to an address outside of it.
+
+### The block volumes
+
+Each machine has two volume claims, `<name>-var` and `<name>-etcd`, with the
+volume mode `Block` and the access mode `ReadWriteOnce`. The machine template
+names the storage class and the size of each. The node image makes the
+filesystems.
+
+The storage class must give:
+
+- Block volumes. With a class that gives only filesystem volumes the claims
+  stay pending.
+- Binding at the first use, `volumeBindingMode: WaitForFirstConsumer`, when a
+  volume stays on one host node. The scheduler then picks a host node in the
+  failure domain of the machine first, and the volume follows. With immediate
+  binding the volume can be on a host node outside the failure domain, and the
+  pod never gets a node.
+- An empty volume for each new machine. The provider deletes the two claims
+  with the machine and wipes nothing. What happens to the volume then is the
+  reclaim policy of the class. A volume that is kept is `Released`, and no new
+  claim binds to it before someone cleans it and makes it available again.
+
+A volume that stays on one host node ties the machine to that node: a new pod
+for the same machine runs there again. When no host node of the failure domain
+has a free volume, the scheduler cannot place the pod, and the machine reports
+`FailureDomainUnavailable`, see [A pod with no place](#a-pod-with-no-place).
+
+[`config/samples/storageclass.yaml`](config/samples/storageclass.yaml) is a
+class for volumes that an operator makes by hand. A CSI driver that makes block
+volumes on demand has its own class.
+
+### Build and push the image
+
+No image of the provider is published. Build it and push it to a registry that
+the host cluster can pull from. From the repository root:
 
 ```bash
-make -C cluster-api-provider-podvm docker-build \
-  IMG=registry.example/cluster-api-provider-podvm:v0.1.0
-CONTROLLER_IMG=registry.example/cluster-api-provider-podvm:v0.1.0 \
-  cluster-api-provider-podvm/hack/release-manifests.sh
+REPO=registry.example.com/nvke/cluster-api-provider-podvm
+make -C cluster-api-provider-podvm docker-push-arch IMG_REPO="$REPO" PUSH_TAGS=v0.1.0 ARCH=amd64
+make -C cluster-api-provider-podvm docker-push-arch IMG_REPO="$REPO" PUSH_TAGS=v0.1.0 ARCH=arm64
+make -C cluster-api-provider-podvm docker-manifest IMG_REPO="$REPO" PUSH_TAGS=v0.1.0
 ```
 
-For a source-tree installation:
+`docker-push-arch` builds one architecture and pushes it as
+`<repo>:<tag>-<arch>`. Run it on a machine of that architecture, or with a
+builder that can build it. `docker-manifest` joins the two into `<repo>:<tag>`.
+For a host cluster with one architecture, run the first command only and use
+the tag `v0.1.0-amd64` below.
+
+`make docker-build` pushes nothing. It writes an OCI archive for both
+architectures to `out/cluster-api-provider-podvm.oci.tar`.
+
+### Render and apply the manifests
 
 ```bash
-kubectl apply -k cluster-api-provider-podvm/config/default
+CONTROLLER_IMG="$REPO:v0.1.0" cluster-api-provider-podvm/hack/release-manifests.sh
+kubectl apply -f cluster-api-provider-podvm/out/infrastructure-components.yaml
+kubectl -n podvm-system rollout status deployment/podvm-controller-manager
 ```
 
-The generated `cluster-api-provider-podvm/out/infrastructure-components.yaml`
-and `metadata.yaml` are the artifacts for a clusterctl provider repository.
+The manifests hold the three CRDs, the RBAC and the Deployment
+`podvm-controller-manager`, in the namespace `podvm-system`.
+`out/infrastructure-components.yaml` and `out/metadata.yaml` are also the
+artifacts for a clusterctl provider repository.
 
-The host cluster needs a Kata RuntimeClass, Multus with a network attachment
-that takes the address and the hardware address from the pod annotation, and
-a storage class for block volumes.
+`kubectl apply -k cluster-api-provider-podvm/config/default` installs the same
+objects with the placeholder image
+`docker.io/library/cluster-api-provider-podvm:latest` and the pull policy
+`IfNotPresent`. It gives a running provider only where that image is already in
+the image store of the node, for example in a local test cluster that loads the
+image.
 
 ## Regenerating
 
