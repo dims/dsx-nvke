@@ -34,7 +34,7 @@ State of 2026-11-28. A first run is in work, on one arm64 machine with `/dev/kvm
 - On arm64 `up.sh` also gives each kind node a larger `/dev/shm`. QEMU keeps the memory of a guest there, and a container has 64 MB of it.
 - Each mark, each time and each number of this guide is from amd64.
 - Steps that passed on arm64: 1 to 13, each as it is written here, on 2026-11-28. The guest kernel of step 3 has the same file name there. Step 4 took 11 minutes, and the base image of step 5 has 1.1 GB. The pod of step 8 runs on QEMU and prints the same kernel version.
-- Scenarios that passed on arm64: 1, 2, 3, 4, 5 and 6, on 2026-11-28. The status was `Provisioned` after 2 minutes and 26 seconds, and each of the four nodes was Ready after 3 minutes and 47 seconds. In scenario 3 the node was Ready again after 55 seconds. The rollout of scenario 5 took 8 minutes and 46 seconds, with no failed call. In scenario 6 the change took 6 minutes and 54 seconds and the rollout after it 7 minutes and 43 seconds, with no failed call. The other scenarios did not run there yet.
+- Scenarios that passed on arm64: 1, 2, 3, 4, 5, 6, 8, 9 and 10, on 2026-11-28. The status was `Provisioned` after 2 minutes and 26 seconds, and each of the four nodes was Ready after 3 minutes and 47 seconds. In scenario 3 the node was Ready again after 55 seconds. The rollout of scenario 5 took 8 minutes and 46 seconds, with no failed call. In scenario 6 the change took 6 minutes and 54 seconds and the rollout after it 7 minutes and 43 seconds, with no failed call. The upgrade of scenario 8 took 8 minutes and 36 seconds. It ran at `8bc32175`, one state before the one that this guide names, and 1 of 481 calls failed in the last upgrade step. In scenario 9 the two new workers took 73 seconds, a delete with a new worker 67 seconds and a reboot 16 seconds. The delete of scenario 10 took 61 seconds. Scenario 7 did not run there yet.
 
 ## The marks
 
@@ -128,7 +128,7 @@ Run the commands of the README, section "2. Build the images and nvkectl", from 
 
 ### 7. Bring the host cluster up
 
-**Ran in the first run of 2026-11-28, in two parts.** The first try stopped at the step `kata`, and the fix is in the public branch. With it each check below passed. A run of the script in one go is planned for the end of the first run. The script took about 4 minutes.
+**Ran in the first run of 2026-11-28.** The first try stopped at the step `kata`, and the fix is in the public branch. A second pass at the end of the run ran the script in one go from the public tip: 3 min 9 s, and each check below passed.
 
 ```bash
 $NVKE/controller/hack/podvm-kind/up.sh
@@ -190,7 +190,7 @@ Run the commands of the README, section "4. Install Cluster API and the provider
 
 ### 11. Install CAPNICo and start the simulator
 
-**Ran in the first run of 2026-11-28, after one fix of the branch.** It took 1 min 43 s. The first try stopped, because the README called `install-capnico.sh` by its path and the script has no execute bit. The fix is in the public branch.
+**Ran in the first run of 2026-11-28.** The first try stopped, because the README called `install-capnico.sh` by its path and the script has no execute bit. The fix is in the public branch. A second pass at the end of the run passed from the public tip, in 1 min 12 s.
 
 Run the commands of the README, section "5. Install CAPNICo and start the simulator", from `$NVKE`. They get the CAPNICo source as a Go module, build CAPNICo from it and start the simulator.
 
@@ -200,7 +200,7 @@ Run the commands of the README, section "5. Install CAPNICo and start the simula
 
 ### 12. Install the management plane
 
-**Ran in the first run of 2026-11-28, after one fix of the branch.** It takes about 2 minutes. The first try stopped, because the README had no step for the image of the profiles fixture. The fix is in the public branch: steps 6 and 9 now build and load four images.
+**Ran in the first run of 2026-11-28.** The first try stopped, because the README had no step for the image of the profiles fixture. The fix is in the public branch: steps 6 and 9 now build and load four images. A second pass at the end of the run passed from the public tip, in 1 min 55 s.
 
 Run the commands of the README, section "6. Install the management plane", from `$NVKE`.
 
