@@ -393,7 +393,13 @@ container report a new boot ID like a real machine.
 | `NICO_CONTAINERS_REQUIRE_HEALTHY` | `false` | Fail startup when Docker is unavailable |
 | `NICO_CONTAINERS_NODE_NETWORK` | `kind` | Docker network for container nodes |
 | `NICO_CONTAINERS_NODE_IMAGE` | `cwe-capd-kindest-node:local` | Container node image |
+| `NICO_CONTAINERS_SPIRE_ATTESTATION_METHOD` | `tpm` | SPIRE node attestation method of the container nodes: `tpm`, `joinToken` or `dsxImds`. Use the method the node image was built with. With `tpm`, an instance stays `Pending` until the node reports its TPM endorsement certificate |
 | `NICO_CONTAINERS_DOCKER_BINARY` | `docker` | Docker CLI path |
+
+The NVKE controller must run with `NODE_REBOOT_SOFT_REBOOT_ENABLED=false` for
+container nodes. A reboot inside the container gives the node no new boot ID,
+so with the default the controller waits up to 30 minutes for one before it
+asks CAPNICo for the reboot that the section above describes.
 
 The default seed includes one container site. A custom seed without a container
 site must set `NICO_CONTAINERS_ENABLED=false`.
