@@ -123,6 +123,14 @@ func (s *NodeAgentServer) ReconcileInterruptedStaticPodParks(ctx context.Context
 		failures = append(failures, s.restoreParkedStaticPodManifests(ctx, parked))
 	}
 
+	// A control plane endpoint gate the defragmentation closed is the same debt,
+	// with the gate file as its record. It is settled here and not with the
+	// kube-vip manifest, because a node behind a gate usually has no kube-vip.
+	// After the manifests, for the reason kube-vip goes last.
+	s.staticPodMutationMu.Lock()
+	failures = append(failures, s.openControlPlaneEndpointGate(loggingOperationProgress{reason: "interrupted-operation-recovery"}, defaultEtcdDefragParkDir))
+	s.staticPodMutationMu.Unlock()
+
 	// After the restores, and not gating them. A record cannot be settled on a
 	// node whose Persister is failing, and that must not be a reason to leave
 	// the control plane parked.

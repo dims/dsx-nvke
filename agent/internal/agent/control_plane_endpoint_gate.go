@@ -180,6 +180,30 @@ func (s *NodeAgentServer) openControlPlaneEndpointGate(progress nodeAgentOperati
 	return nil
 }
 
+// handOffControlPlaneEndpointGateToCaller is the gate's half of
+// handOffParkedManifestsToCaller. It names the shared park directory as the
+// owner of a gate the defragmentation closed, so the startup reconciler leaves
+// the gate closed.
+func (s *NodeAgentServer) handOffControlPlaneEndpointGateToCaller() error {
+	if s.ControlPlaneEndpointGate.File == "" {
+		return nil
+	}
+	path := s.rootedPath(s.ControlPlaneEndpointGate.File)
+	owner, closed, err := readControlPlaneEndpointGate(path)
+	if err != nil {
+		return err
+	}
+	if !closed || owner != defaultEtcdDefragParkDir {
+		return nil
+	}
+	if _, err := s.closeControlPlaneEndpointGate(defaultStaticPodBackupDir); err != nil {
+		return fmt.Errorf("hand the control plane endpoint gate to the caller: %w", err)
+	}
+	slog.Warn("handed the closed control plane endpoint gate to the caller; this node stays out of the load balancer until a caller restores it",
+		"gateFile", path)
+	return nil
+}
+
 // readControlPlaneEndpointGate reports whether the gate is closed and, if so,
 // which park directory it names. A gate file the agent did not write names
 // none, and counts as a caller's.
