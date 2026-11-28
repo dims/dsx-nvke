@@ -14,6 +14,7 @@ source + output together.
 | `controller/api/openapi.yaml` | `make generate` in `controller/` | spec + `api/*.gen.go` |
 | `agent/pkg/agent/proto/node_agent.proto` | `make protos` in `agent/` | `.proto` + `*.pb.go` |
 | CAPI types/markers in `cluster-api-provider-provisioned/` | `make generate manifests` there | types + deepcopy, CRDs, `config/rbac/role.yaml` |
+| CAPI types/markers in `cluster-api-provider-podvm/` | `make generate manifests` there | types + deepcopy, CRDs, `config/rbac/role.yaml` |
 | `MachineImage`, `ClusterRelease` or `NodePoolRelease` types/markers in `controller/k8s-apis/v1/` | `make -C controller/k8s-apis generate manifests`, then `make chart-crds-check` at the root | types + `zz_generated.deepcopy.go` + the controller chart's `files/crds/*.yaml` |
 | `NVKECluster`, `ControlPlaneClass`, `ClusterReleaseChannel`, `MachineImage`, `ClusterRelease` or `NodeProfile` types/markers in `management-engine/apis/v1/` | `make -C management-engine manifests-state` | types + `zz_generated.deepcopy.go` + `config/crd/bases` |
 | any module `go.mod`/`go.sum` | `make work-sync`, then `make notices`, at the root | `go.work` + `go.work.sum` + every changed `THIRD_PARTY_NOTICES.md` |
@@ -29,7 +30,7 @@ Rules that trip people up:
   Flox is optional — plain `make` works without it. If you do activate it,
   match the CLI version in `.flox-cli-version`.
 - Drift gates in CI: `make check-protos` (agent), `make notices-check` (root),
-  `make generate-check` (provisioned provider), `make chart-crds-check` (the
+  `make generate-check` (provisioned and pod VM providers), `make chart-crds-check` (the
   controller chart's release CRDs), `go-work-check` (workspace).
   If one fails, regenerate and commit the result — do not revert the output.
 - `controller/deploy/charts/` READMEs are helm-docs output of `values.yaml`

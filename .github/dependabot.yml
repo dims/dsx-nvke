@@ -67,7 +67,8 @@ updates:
       # #901.
       #
       # Taking it needs a deliberate cluster-api 1.13 -> 1.14 migration of
-      # controller, cluster-api-provider-provisioned and
+      # controller, cluster-api-provider-provisioned,
+      # cluster-api-provider-podvm and
       # controller/hack/capd-reboot-controller, moving the parent and the new
       # api module together. Drop these two entries when that happens. See #88.
       #
