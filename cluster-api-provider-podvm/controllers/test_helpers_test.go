@@ -235,6 +235,21 @@ func setPodPhase(t *testing.T, k8sClient client.Client, name string, phase corev
 	require.NoError(t, k8sClient.Status().Update(context.Background(), pod))
 }
 
+// setPodScheduled plays the part of the scheduler of the host cluster: it
+// writes the condition PodScheduled of a pod that does not run. The scheduler
+// writes the status False with the reason Unschedulable and its text when it
+// finds no node, and the status True when the pod has a node.
+func setPodScheduled(t *testing.T, k8sClient client.Client, name string, status corev1.ConditionStatus, reason, message string) {
+	t.Helper()
+	pod := getPod(t, k8sClient, name)
+	pod.Status.Phase = corev1.PodPending
+	pod.Status.ContainerStatuses = nil
+	pod.Status.Conditions = []corev1.PodCondition{{
+		Type: corev1.PodScheduled, Status: status, Reason: reason, Message: message,
+	}}
+	require.NoError(t, k8sClient.Status().Update(context.Background(), pod))
+}
+
 // startNodeAgent plays the kubelet at the moment the startup probe passes: the
 // pod runs and the node agent in it accepts a connection.
 func startNodeAgent(t *testing.T, k8sClient client.Client, name string) {
