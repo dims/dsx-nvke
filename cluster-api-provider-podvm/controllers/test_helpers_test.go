@@ -5,11 +5,17 @@ package controllers
 
 import (
 	"net/netip"
+	"testing"
 
+	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	infrav1 "github.com/dsx-ai-factory/nvke/cluster-api-provider-podvm/api/v1alpha1"
 )
@@ -34,6 +40,36 @@ const (
 	testFirstMAC      = "02:00:ac:1c:01:01"
 	testProviderID    = "podvm://" + testPodNamespace + "/" + testMachineName
 )
+
+func newTestScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	require.NoError(t, clusterv1.AddToScheme(scheme))
+	require.NoError(t, infrav1.AddToScheme(scheme))
+	return scheme
+}
+
+func newPodNamespace() *corev1.Namespace {
+	return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: testPodNamespace}}
+}
+
+func newInfraCluster() *infrav1.PodVMCluster {
+	return newInfraClusterNamed(testClusterName, testCIDR)
+}
+
+func newInfraClusterNamed(name, cidr string) *infrav1.PodVMCluster {
+	return &infrav1.PodVMCluster{
+		TypeMeta:   metav1.TypeMeta{APIVersion: infrav1.GroupVersion.String(), Kind: "PodVMCluster"},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+		Spec: infrav1.PodVMClusterSpec{
+			PodNamespace:      testPodNamespace,
+			RuntimeClassName:  testRuntimeClass,
+			NetworkAttachment: infrav1.NetworkAttachmentReference{Name: testNetworkName},
+			AddressRange:      infrav1.AddressRange{CIDR: cidr, PrefixLength: testPrefixLength},
+		},
+	}
+}
 
 func newInfraMachine(name string) *infrav1.PodVMMachine {
 	isController := true
@@ -71,6 +107,27 @@ func newAllocatedInfraMachine(name, address string) *infrav1.PodVMMachine {
 	machine.Status.PodNamespace = testPodNamespace
 	machine.Status.PodName = name
 	return machine
+}
+
+func newFakeClient(t *testing.T, objects ...client.Object) client.Client {
+	t.Helper()
+	return fake.NewClientBuilder().
+		WithScheme(newTestScheme(t)).
+		WithObjects(objects...).
+		WithStatusSubresource(&infrav1.PodVMMachine{}, &infrav1.PodVMCluster{}, &corev1.Pod{}).
+		Build()
+}
+
+func requireReadyCondition(t *testing.T, conditions []metav1.Condition, status metav1.ConditionStatus, reason string) {
+	t.Helper()
+	for _, condition := range conditions {
+		if condition.Type == infrav1.ReadyCondition {
+			require.Equal(t, status, condition.Status, condition.Message)
+			require.Equal(t, reason, condition.Reason, condition.Message)
+			return
+		}
+	}
+	t.Fatalf("no %s condition found in %v", infrav1.ReadyCondition, conditions)
 }
 
 func mustHardwareAddress(address string) string {
