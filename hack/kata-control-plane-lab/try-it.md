@@ -22,6 +22,7 @@ State of 2026-11-28. The guide uses two public branches:
 - `sudo` rights, for `modprobe`, `sysctl` and `losetup`.
 - Docker 28 or newer with `buildx`. A container must reach the internet.
 - `git`, `make`, a C compiler, `python3`, `curl`, `jq`, `tar` with `zstd`, Go 1.27, `kind`, `kubectl`, `helm`, `clusterctl`, and for the kernel build `yq`, `flex`, `bison`, `patch` and the headers of `libelf`.
+- The NVKE tree pins the versions that it is tested with: `kind`, `kubectl`, `helm` and Cluster API (for `clusterctl`) in `make/tool-versions.mk`, and Go in `go.work`. The first run used these versions.
 - No account and no secret. Each input is public.
 
 ## The marks
@@ -50,7 +51,7 @@ The run follows `controller/hack/podvm-kind/README.md` of the NVKE tree. This gu
 
 ### 1. Check the machine
 
-**Lab.**
+**Ran in the first run of 2026-11-28.**
 
 ```bash
 ls -l /dev/kvm
