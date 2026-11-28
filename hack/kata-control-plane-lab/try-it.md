@@ -2,10 +2,10 @@
 
 State of 2026-11-28. The guide uses two public branches:
 
-- `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `e6ff4e4b`
+- `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `7da67615`
 - `integration/control-plane-kata-pods` of `https://github.com/dims/kata-containers`, at `96a8d905b`
 
-**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Each other part ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
+**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Scenario 1, the first cluster, passed too. Each other scenario ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
 
 ## What the feature is
 
@@ -32,7 +32,7 @@ State of 2026-11-28. The guide uses two public branches:
 - **New.** It never ran in any form.
 - **Ran in the first run of 2026-11-28.** The step passed as this guide has it, in the first run of the guide on one machine.
 
-A mark says nothing about this path as a whole. No step here has a pass from a run of the guide.
+A mark says nothing about this path as a whole. The first run is not at its end.
 
 ## Part 1, set up
 
@@ -91,7 +91,7 @@ grep -c -E '^CONFIG_(OPENVSWITCH|INET_DIAG_DESTROY)=y' ~/kata-kernel/out/opt/kat
 
 ### 4. Build the guest image
 
-**Ran in the first run of 2026-11-28.** The build took 6 min 24 s. If the agent of the image has the two changes shows in scenario 1.
+**Ran in the first run of 2026-11-28.** The build took 6 min 24 s. Scenario 1 showed the first of the two changes in the agent of the image: a pod that runs systemd takes an exec probe. The second, a stop in seconds, shows when a pod stops, from scenario 3 on.
 
 Run the commands for `kata-containers.img` of the README, section "1. Build the guest kernel and the guest image". `KATA_SRC` is the Kata tree of step 2, which has the two agent changes.
 
@@ -113,7 +113,7 @@ Run the two commands of `cluster-api-provider-podvm/node-image/README.md`, secti
 Run the commands of the README, section "2. Build the images and nvkectl", from `$NVKE`.
 
 - **See.** `docker image inspect podvm-node:local nvke-controller:local cluster-api-provider-podvm:latest docker.local/cwe-profiles:tilt --format '{{.RepoTags}}'` prints four lines, and `nvkectl version` prints a version.
-- The node image of this tree never ran in a pod. Scenario 1 is its first run.
+- The node image of this tree ran in a pod for the first time in scenario 1 of the first run.
 
 ### 7. Bring the host cluster up
 
@@ -133,7 +133,7 @@ The script runs eight steps. Each can run again alone, for example `up.sh kata`.
 | `nodes` | In each kind node: D-Bus, loop device nodes, the bridge `br-nodenet`, two CNI plugins | Ran in the first run |
 | `multus` | Multus, the namespace `podvm-clusters` and its network attachment | Ran in the first run |
 | `kata` | Kata Containers 4.4.0 with the runtime class `kata-podvm` | Ran in the first run, at the second try |
-| `metallb` | MetalLB with a pool on the node network | Ran in the first run. If it answers on the node network shows in scenario 1 |
+| `metallb` | MetalLB with a pool on the node network | Ran in the first run. It answers on the node network: scenario 1 |
 | `storage` | Loop devices and the local static provisioner in block mode | Ran in the first run |
 
 ```bash
@@ -252,7 +252,7 @@ load() { for n in $(kind get nodes --name podvm); do
 
 ### Scenario 1, one request makes the cluster
 
-**Lab.** The lab sent the same fields as JSON with `curl`, and made the Service by hand. The Service that the provider makes is **New**.
+**Ran in the first run of 2026-11-28.** It was the first cluster with the Service that the provider makes, and the first run of the node image of this tree in a pod.
 
 ```bash
 cd $NVKE
@@ -263,8 +263,8 @@ nvkectl get kubeconfig podvm-example --output-file $TRY/podvm-example.kubeconfig
 kc get nodes -o wide
 ```
 
-- **Pass.** The Service `podvm-example-control-plane` has the external address `172.28.255.220`. Three pods run, each on another kind worker. The cluster has the status `Provisioned`. `kc get nodes` shows three control plane nodes and one worker, each Ready. No other step by hand.
-- **Time.** The lab measured 5 to 6 minutes for a cluster of five nodes.
+- **Pass.** The Service `podvm-example-control-plane` has the external address `172.28.255.220`. Three pods run, each on another kind worker. The cluster has the status `Provisioned`. `kc get nodes` shows three control plane nodes and one worker, each Ready. No other step by hand. The status `Provisioned` comes when the first control plane node is up. The other nodes join after that, so run the last command again until it shows four nodes.
+- **Time.** In the first run the Service had its address after 11 s, the status `Provisioned` came after 3 min 29 s, and the last of the four nodes was Ready after 5 min 37 s.
 - **If not.** `kh -n nvke-system get podvmclusters,podvmmachines` shows the reason of the provider. For a pod that stays Pending, run `kh -n podvm-clusters describe pod <name>`. For a node that does not join, read `kh -n nvke-controller logs deployment/nvke-controller`.
 
 ### Scenario 2, pod traffic between the nodes
