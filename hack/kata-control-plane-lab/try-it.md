@@ -2,7 +2,7 @@
 
 State of 2026-11-28. The guide uses two public branches:
 
-- `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `bba3c232`
+- `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `9b82daf4`
 - `integration/control-plane-kata-pods` of `https://github.com/dims/kata-containers`, at `96a8d905b`
 
 **Nothing of this path ran from start to end yet.** Each part ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
@@ -108,11 +108,7 @@ Run the two commands of `cluster-api-provider-podvm/node-image/README.md`, secti
 
 **Lab** for the controller image and the provider image. **Ran** for the node image and `nvkectl`.
 
-Run the three commands of the README, section "2. Build the images", from `$NVKE`. Then:
-
-```bash
-make -C $NVKE/cli build
-```
+Run the commands of the README, section "2. Build the images and nvkectl", from `$NVKE`.
 
 - **See.** `docker image inspect podvm-node:local nvke-controller:local cluster-api-provider-podvm:latest --format '{{.RepoTags}}'` prints three lines, and `nvkectl version` prints a version.
 - The node image of this tree never ran in a pod. Scenario 1 is its first run.
@@ -181,25 +177,17 @@ Run the commands of the README, section "4. Install Cluster API and the provider
 
 **New.** The lab installed a released CAPNICo image and ran the simulator in a container.
 
-Get the CAPNICo source as `docs/get-started/quickstart-local.md` says, section "Get the CAPNICo source". Its copy is the folder `nvke-quickstart-capnico` beside the NVKE tree. Then, from `$NVKE`:
-
-```bash
-CAPNICO_SOURCE_DIR=$TRY/nvke-quickstart-capnico \
-CAPNICO_STAGED_CHART_DIR=$NVKE/controller/.local/capnico-chart \
-KIND_CLUSTER_NAME=podvm controller/hack/nico-provider/install-capnico.sh
-controller/hack/podvm-kind/up.sh sim
-```
+Run the commands of the README, section "5. Install CAPNICo and start the simulator", from `$NVKE`. They get the CAPNICo source as a Go module, build CAPNICo from it and start the simulator.
 
 - **See.** `kh -n capnico-system get pods` shows a manager that runs. `up.sh sim` ends with no error. It waits for the answer of the simulator itself.
-- **If not.** The log of the simulator is `~/.local/state/podvm-kind/nico-sim/nico-sim.log`.
-- The README command for this step has no `CAPNICO_STAGED_CHART_DIR`, and the script stops without it. Use the lines above.
+- **If not.** The log of the simulator is `~/.local/state/podvm-kind/nico-sim/nico-sim.log`. For a fault of `kind load`, read "Known obstacles".
 - A worker of the simulator is a privileged container on the kernel of your machine. `up.sh sim` loads the kernel module `openvswitch` for it.
 
 ### 12. Install the management plane
 
 **New.** The lab had its own install script.
 
-Run the three commands of the README, section "5. Install the management plane", from `$NVKE`.
+Run the commands of the README, section "6. Install the management plane", from `$NVKE`.
 
 ```bash
 helm --kube-context kind-podvm list --all-namespaces
@@ -214,7 +202,7 @@ kh get clusterrole nvke-controller-podvm
 
 **New.** The lab called the API with `curl` and never ran `nvkectl`.
 
-Run the first three commands of the README, section "6. Create a cluster". Stop before `nvkectl create cluster`.
+Run the first three commands of the README, section "7. Create a cluster". Stop before `nvkectl create cluster`.
 
 ```bash
 nvkectl get clusters
@@ -476,7 +464,7 @@ docker ps --format '{{.Names}}'
 - **A firewall that drops forwarded packets from a Docker bridge.** Then no container reaches the internet. A kind node cannot install D-Bus or pull an image, a new node cannot pull, and the build containers of Kata cannot download. Step 1 shows it. The guide has no way around it.
 - **A Docker with no `buildx`.** The controller image and the provider image need it. Install the `buildx` plugin of Docker.
 - **A proxy.** Docker, the kind nodes and the nodes of the new cluster each need the proxy settings. This guide does not set them.
-- **`kind load docker-image` fails.** With the containerd image store of Docker, kind cannot import an image that has one platform. `install-capnico.sh` uses `kind load` for the CAPNICo image. If it fails, load that image with the `load` helper of Part 2 and run the script again.
+- **`kind load docker-image` fails.** With the containerd image store of Docker, kind cannot import an image that has one platform. `install-capnico.sh` uses `kind load` for the CAPNICo image. If it fails, the image `cluster-api-provider-nico:local` is built and not loaded. Load it with the `load` helper of Part 2. Then run the `install-capnico.sh` line of the README again with `KIND_BIN=true` in front, so that the script skips its own load.
 - **The subnet `172.28.0.0/16` is in use.** `up.sh network` then fails. The subnet is a constant of `up.sh`, of `metallb.yaml` and of the example request.
 - **A restart of the machine or of a kind node.** The bridge and the loop devices are gone then. Run `up.sh` again.
 

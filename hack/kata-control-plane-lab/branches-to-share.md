@@ -1,6 +1,6 @@
 # Branches to share: NVKE control plane nodes as Kata pods
 
-Last update: 2026-11-28, 08:47 local time. Each tip in the state table was the tip of its branch on the fork at that time (fetched at 08:47).
+Last update: 2026-11-28, 08:54 local time. Each tip in the state table was the tip of its branch on the fork at that time (fetched at 08:54).
 
 This page lists the only branches that the larger team needs. Each of the eleven is meant to become one pull request. No pull request is open yet. One more branch, `integration/control-plane-kata-pods`, holds the commits of the ten NVKE branches together, for a person who wants to try the feature. It is not for a pull request. Every other branch on the two forks is lab material and is not for sharing.
 
@@ -21,7 +21,7 @@ This page lists the only branches that the larger team needs. Each of the eleven
 | 8 | `feat/cluster-api-provider-podvm` | `08379976` | 22 | 10,943 added, 9 removed | The points of the fresh review are in since 2026-11-28, 08:28. Six commits are newer than the lab run: the provider makes the Service of the control plane endpoint, the controller chart grants the rights, samples, and docs. They have not run in a cluster |
 | 9 | `feat/podvm-node-image` | `27806a56` | 3, on top of branch 8 | 1,253 added, 2 removed | The points of the fresh review are in since 2026-11-28: a volume is formatted only when two checks agree that it is empty, a file mode is read as cloud-init reads it, and the README has no lab number and has the full kernel build command. The image builds. It has not run in a pod yet, and that run is the open point |
 | 10 | `fix/agent-kill-child-cgroups` (Kata) | `e0f5597` | 1 | 161 added, 6 removed | Ready |
-| 11 | `feat/podvm-deploy-path` | `b4bbfa94` | 12, on top of branch 9 | 1,846 added, 2 removed | New on 2026-11-28. Nothing of it ran on a cluster yet: every check so far is a static check. The first run from an empty machine is the open point |
+| 11 | `feat/podvm-deploy-path` | `c39d6323` | 12, on top of branch 9 | 1,867 added, 2 removed | New on 2026-11-28. Nothing of it ran on a cluster yet: every check so far is a static check. The first run from an empty machine is the open point |
 
 "Ready" means that the commits are final in content. After the rework, all branches are built together again and the lab tests run again. This page gets the result.
 
@@ -50,12 +50,12 @@ Before a pull request, each branch still needs these things. They are rules of t
 
 https://github.com/dims/dsx-nvke/tree/integration/control-plane-kata-pods
 
-- What it is: the commits of branches 1 to 7 and of branch 11 (which brings branches 8 and 9), picked in the order above onto the main commit `d625fcfa`. It has no code of its own. Tip `bba3c232`, 54 commits.
+- What it is: the commits of branches 1 to 7 and of branch 11 (which brings branches 8 and 9), picked in the order above onto the main commit `d625fcfa`. It has no code of its own. Tip `9b82daf4`, 54 commits.
 - What it is for: one tree to build the agent, the controller, the simulator, the provider and the node image from, with the deploy path and the kind host cluster scripts, for a person who wants to try the feature. It is not for a pull request and not for review.
 - One place differs from the branches: branch 1 and branch 6 each add a field at the end of the same struct in `agent/internal/agent/agent.go`. The integration branch has both fields. The README of the simulator has the lines of branch 3 and of branch 11, and the docs page on infrastructure providers has the lines of branch 7 and of branch 11. Each other file that a branch changes is the same as in that branch.
 - It is built again after each change of a branch, so its history is rewritten. Do not base work on it.
 - The guide for a first run is `try-it.md`, next to this page. It is written for a person outside the team who has only the two public forks. Nothing of it ran from start to end yet, and each step has a mark for what ran.
-- Check at 08:30 on 2026-11-28: `make build` passes for all modules. The tests of the agent module and of the provider module pass, and so do the controller tests of the four packages that branches 5 and 7 change. The CLI test decodes both example requests of branch 11. The deploy list check, the docs check and the workspace check pass.
+- Check at 08:54 on 2026-11-28: `make build` passes for all modules. The tests of the agent module and of the provider module pass. The CLI test decodes both example requests of branch 11. The deploy list check and the docs check pass.
 - Kata Containers has its own integration branch, because the guest needs two changes of the Kata agent: https://github.com/dims/kata-containers/tree/integration/control-plane-kata-pods (tip `96a8d905b`). It is Kata 4.4.0 plus the commit of branch 10 and a backport of the open upstream pull request 13627 of another author, which lets an exec work after systemd starts in the container.
 
 ## What each branch does
@@ -255,12 +255,12 @@ The branch adds what a person needs, beyond the provider and its node image, to 
   - The local static provisioner of the Kubernetes storage group in block mode, over loop devices, with a fixed number of volumes on each host node. A released volume is cleaned.
 - `2567975d` feat(hack): start the NICo simulator with its workers on the node network (54 lines)
   - `up.sh sim` starts the simulator. A worker has one network, the node network.
-- `36091f28` docs(hack): describe the run on the kind host cluster (184 lines)
-  - The README of `controller/hack/podvm-kind/` with the whole run in six steps: build the guest kernel and the guest image, build the images, bring the host cluster up, install Cluster API and the provider, install the management plane, create a cluster. Then workers from the simulator, the clean up, and what is not covered.
-- `4516f4f7` docs(operate): say how a provider outside the closed set is used (2 lines)
-- `71f52bdd` docs(nico-sim): describe the attestation method and the reboot setting (6 lines)
-- `56e3be69` docs(cli): add an example node pool of nico-mock workers for a pod VM cluster (48 lines)
-- `b4bbfa94` docs(cli): add an example cluster with control plane nodes as pods (109 lines)
+- `6d9df7e1` docs(hack): describe the run on the kind host cluster (205 lines)
+  - The README of `controller/hack/podvm-kind/` with the whole run in seven steps, in the order in which a reader runs them: build the guest kernel and the guest image, build the images and `nvkectl`, bring the host cluster up, install Cluster API and the provider, install CAPNICo and start the simulator, install the management plane, create a cluster. Then the clean up and what is not covered. The try-out guide `try-it.md` follows it step by step. Writing that guide showed four gaps in this README, which are closed since 2026-11-28, 08:54.
+- `a6f95216` docs(operate): say how a provider outside the closed set is used (2 lines)
+- `4c3bd70b` docs(nico-sim): describe the attestation method and the reboot setting (6 lines)
+- `d4191076` docs(cli): add an example node pool of nico-mock workers for a pod VM cluster (48 lines)
+- `c39d6323` docs(cli): add an example cluster with control plane nodes as pods (109 lines)
   - `cli/examples/podvm-cluster.yaml`. It uses the request field of branch 5. So the test that decodes the examples fails for this file on this branch alone and passes with branch 5 below it, as in the integration branch. The pull request of this branch comes after branch 5.
 - Proof so far, static checks only: the repository checks pass at the tip (deploy lists, license headers, names, internal config, docs, shell lint, workflows), the controller chart renders with the settings of the path and differs from the render of `capnico-e2e` only in the four intended points, the deploy executor walks the ten items of the path in a dry run, and the Kata chart of 4.4.0 renders the custom runtime. The charts of MetalLB and of the storage provisioner were not rendered.
 - Open: nothing of it ran on a cluster. These things run for the first time in the first run: the guest image build from the make target of Kata, the custom runtime of the Kata chart, MetalLB on the bridge, the provisioner on loop devices, the simulator as a process on the machine, `deploy-stack.sh` outside its test runner, the Service that the provider makes, a worker with one network, a new node that pulls its own images, and `nvkectl`.
