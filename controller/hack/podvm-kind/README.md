@@ -93,12 +93,16 @@ from the repository root:
 ```bash
 BASE_IMAGE=cwe-capd-kindest-node:local IMAGE=podvm-node:local \
   cluster-api-provider-podvm/node-image/build-image.sh
-make -C controller docker-build-local IMG=nvke-controller:local
-make -C cluster-api-provider-podvm docker-build PLATFORMS=linux/amd64 BUILDX_OUTPUT=type=docker
+make -C controller docker-build-local IMG=nvke-controller:local LOCAL_PLATFORM="linux/$(go env GOARCH)"
+make -C cluster-api-provider-podvm docker-build PLATFORMS="linux/$(go env GOARCH)" BUILDX_OUTPUT=type=docker
 docker build --tag docker.local/cwe-profiles:tilt controller/test/fixtures
 make -C cli build
 export PATH="${PWD}/cli/bin:${PATH}"
 ```
+
+`go env GOARCH` is the architecture of the machine. A kind node runs only
+images of that architecture, and `docker-build-local` builds for amd64 when
+nothing names the platform.
 
 `docker.local/cwe-profiles:tilt` is the image of the profiles fixture. The
 deploy path names it, as the `capnico-e2e` path does, and an init container of
@@ -114,9 +118,10 @@ controller/hack/podvm-kind/up.sh
 Then load the four images into the kind nodes:
 
 ```bash
+platform="linux/$(go env GOARCH)"
 for image in podvm-node:local nvke-controller:local cluster-api-provider-podvm:latest docker.local/cwe-profiles:tilt; do
   for node in $(kind get nodes --name podvm); do
-    docker save --platform linux/amd64 "${image}" | docker exec -i "${node}" ctr -n k8s.io images import --digests -
+    docker save --platform "${platform}" "${image}" | docker exec -i "${node}" ctr -n k8s.io images import --digests -
   done
 done
 ```
