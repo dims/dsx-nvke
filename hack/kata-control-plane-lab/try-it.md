@@ -354,7 +354,7 @@ while sleep 1; do kc get --raw /readyz --request-timeout=3s >/dev/null && echo o
 
 ### Scenario 6, turn etcd encryption on
 
-**Lab.** **Not passed in the first run of 2026-11-28.** NVKE did not start the change. It needs a node agent of the version 0.1.26 or newer. The build of step 5 takes the version of the node agent from the version tags of the tree, and this fork has no tag, so the agent names itself by a commit hash. The status of the cluster then stays `Updating` for 30 minutes. The scenario runs again when the fork has the tags.
+**Lab.** **Not passed in the first run of 2026-11-28.** An image built from a clone with no version tag gives a node agent that names itself by a commit, and NVKE refuses to turn encryption on with an agent whose version it cannot read. The fork of this guide has no version tag. "Known obstacles" has what you see.
 
 ```bash
 nvkectl patch cluster podvm-example --patch 'enableEtcdEncryption: true'
@@ -472,6 +472,7 @@ docker ps --format '{{.Names}}'
 - **A Docker with no `buildx`.** The controller image and the provider image need it. Install the `buildx` plugin of Docker.
 - **A proxy.** Docker, the kind nodes and the nodes of the new cluster each need the proxy settings. This guide does not set them.
 - **`kind load docker-image` fails.** With the containerd image store of Docker, kind cannot import an image that has one platform. `install-capnico.sh` uses `kind load` for the CAPNICo image. If it fails, the image `cluster-api-provider-nico:local` is built and not loaded. Load it with the `load` helper of Part 2. Then run the `install-capnico.sh` line of the README again with `KIND_BIN=true` in front, so that the script skips its own load.
+- **A clone with no version tag.** The build of step 5 names the node agent of the image with `git describe --tags --match 'v*'`. In a clone with no such tag the name is a commit, as `nvke-agent --version` in a node shows. NVKE needs a node agent of the version 0.1.26 or newer to turn etcd encryption on, and it cannot read a commit as a version. In scenario 6 the status of the cluster then stays `Updating`, `etcdEncrypted` stays `false`, and the log of the controller has the line `node agent version "<commit>" on control-plane node <name> is older than required version 0.1.26` each minute. The other scenarios do not need the version.
 - **The subnet `172.28.0.0/16` is in use.** `up.sh network` then fails. The subnet is a constant of `up.sh`, of `metallb.yaml` and of the example request.
 - **A restart of the machine or of a kind node.** The bridge and the loop devices are gone then. Run `up.sh` again.
 
