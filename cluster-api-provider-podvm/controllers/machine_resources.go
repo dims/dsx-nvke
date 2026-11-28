@@ -4,14 +4,18 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	infrav1 "github.com/dsx-ai-factory/nvke/cluster-api-provider-podvm/api/v1alpha1"
 )
@@ -109,6 +113,35 @@ func varClaimName(podName string) string        { return podName + "-var" }
 func etcdClaimName(podName string) string       { return podName + "-etcd" }
 func bootstrapSecretName(podName string) string { return podName + "-bootstrap" }
 
+// ownedBy reports whether the provider made the object for this machine. The
+// UID decides: a later PodVMMachine with the same name is another machine.
+func ownedBy(obj client.Object, machine *infrav1.PodVMMachine) bool {
+	return machine.UID != "" && obj.GetLabels()[infrav1.OwnerUIDLabel] == string(machine.UID)
+}
+
+// resourceConflict describes an object that has the name the provider needs
+// and belongs to something else.
+func resourceConflict(kind string, key client.ObjectKey) *machineProblem {
+	return &machineProblem{
+		reason:  infrav1.ResourceConflictReason,
+		message: fmt.Sprintf("%s %s exists and does not belong to this PodVMMachine", kind, key),
+	}
+}
+
+// createProblem says why a create call failed. A call that the API server
+// rejected does not pass at the next try, and its cause is in the host
+// cluster, so it goes into the Ready condition with the answer of the API
+// server. Each other failure stays an error with a retry.
+func createProblem(kind string, key client.ObjectKey, err error) error {
+	if apierrors.IsForbidden(err) || apierrors.IsInvalid(err) || apierrors.IsBadRequest(err) {
+		return &machineProblem{
+			reason:  infrav1.CreateRejectedReason,
+			message: fmt.Sprintf("The API server rejected %s %s: %v", kind, key, err),
+		}
+	}
+	return fmt.Errorf("failed to create %s %s: %w", kind, key, err)
+}
+
 // resourceLabels returns the labels of every object that the provider makes
 // for a machine.
 func resourceLabels(machine *infrav1.PodVMMachine, ownerMachine *clusterv1.Machine) map[string]string {
@@ -119,6 +152,189 @@ func resourceLabels(machine *infrav1.PodVMMachine, ownerMachine *clusterv1.Machi
 		infrav1.OwnerNameLabel:      machine.Name,
 		infrav1.OwnerUIDLabel:       string(machine.UID),
 	}
+}
+
+// podKey returns the place of the pod that the status of the machine records.
+func podKey(machine *infrav1.PodVMMachine) client.ObjectKey {
+	return client.ObjectKey{Namespace: machine.Status.PodNamespace, Name: machine.Status.PodName}
+}
+
+// ownedPod returns the pod of the machine, or nil when it does not exist. A
+// pod with that name that belongs to something else is a problem.
+func (r *MachineReconciler) ownedPod(ctx context.Context, machine *infrav1.PodVMMachine) (*corev1.Pod, error) {
+	key := podKey(machine)
+	pod := &corev1.Pod{}
+	if err := r.client.Get(ctx, key, pod); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get Pod %s: %w", key, err)
+	}
+	if !ownedBy(pod, machine) {
+		return nil, resourceConflict("Pod", key)
+	}
+	return pod, nil
+}
+
+// nodeAgentAnswers reports whether the startup probe of the pod passed: the
+// container "node" is started, so the node agent accepts connections.
+func nodeAgentAnswers(pod *corev1.Pod) bool {
+	for i := range pod.Status.ContainerStatuses {
+		status := &pod.Status.ContainerStatuses[i]
+		if status.Name == nodeContainerName {
+			return ptr.Deref(status.Started, false)
+		}
+	}
+	return false
+}
+
+// createPodResources makes what a pod needs and then the pod: the copy of the
+// bootstrap Secret, the two volume claims, the pod. Each step leaves an object
+// that exists as it is, so the pod of a lost pod gets the claims and the
+// Secret of the pod before it.
+func (r *MachineReconciler) createPodResources(
+	ctx context.Context,
+	machine *infrav1.PodVMMachine,
+	ownerMachine *clusterv1.Machine,
+	infraCluster *infrav1.PodVMCluster,
+	logger *slog.Logger,
+) error {
+	labels := resourceLabels(machine, ownerMachine)
+
+	if err := r.ensureBootstrapSecret(ctx, machine, ownerMachine, labels, logger); err != nil {
+		return err
+	}
+	for _, claim := range []*corev1.PersistentVolumeClaim{
+		buildClaim(machine, varClaimName(machine.Status.PodName), machine.Spec.Volumes.Var, labels),
+		buildClaim(machine, etcdClaimName(machine.Status.PodName), machine.Spec.Volumes.Etcd, labels),
+	} {
+		if err := r.ensureClaim(ctx, machine, claim, logger); err != nil {
+			return err
+		}
+	}
+
+	pod, err := buildPod(machine, ownerMachine, infraCluster, labels)
+	if err != nil {
+		return err
+	}
+	if err := r.client.Create(ctx, pod); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return createProblem("Pod", client.ObjectKeyFromObject(pod), err)
+		}
+		// The cache did not show a pod that exists. It is either the pod this
+		// provider made a moment ago, or a pod of something else.
+		existing := &corev1.Pod{}
+		key := client.ObjectKeyFromObject(pod)
+		if err := r.apiReader.Get(ctx, key, existing); err != nil {
+			return fmt.Errorf("failed to get Pod %s: %w", key, err)
+		}
+		if !ownedBy(existing, machine) {
+			return resourceConflict("Pod", key)
+		}
+		return nil
+	}
+
+	logger.Info("Made the pod of the machine",
+		"pod", pod.Name, "podNamespace", pod.Namespace, "address", machine.Status.Address,
+		"failureDomain", ownerMachine.Spec.FailureDomain,
+	)
+	return nil
+}
+
+// ensureBootstrapSecret copies the bootstrap data of the owner Machine into
+// the pod namespace, where the pod can mount it.
+//
+// It copies one time. A copy that exists stays as it is: the node applied the
+// data at its first start, the join token in it worked one time, and the NVKE
+// controller deletes the source when it deletes the Machine.
+func (r *MachineReconciler) ensureBootstrapSecret(
+	ctx context.Context,
+	machine *infrav1.PodVMMachine,
+	ownerMachine *clusterv1.Machine,
+	labels map[string]string,
+	logger *slog.Logger,
+) error {
+	key := client.ObjectKey{Namespace: machine.Status.PodNamespace, Name: bootstrapSecretName(machine.Status.PodName)}
+	existing := &corev1.Secret{}
+	err := r.apiReader.Get(ctx, key, existing)
+	if err == nil {
+		if !ownedBy(existing, machine) {
+			return resourceConflict("Secret", key)
+		}
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to get Secret %s: %w", key, err)
+	}
+
+	sourceKey := client.ObjectKey{
+		Namespace: ownerMachine.Namespace,
+		Name:      ptr.Deref(ownerMachine.Spec.Bootstrap.DataSecretName, ""),
+	}
+	if sourceKey.Name == "" {
+		return &machineProblem{
+			reason:  infrav1.WaitingForBootstrapDataReason,
+			message: "Waiting for spec.bootstrap.dataSecretName of the owner Machine",
+		}
+	}
+	source := &corev1.Secret{}
+	if err := r.apiReader.Get(ctx, sourceKey, source); err != nil {
+		if apierrors.IsNotFound(err) {
+			return &machineProblem{
+				reason:  infrav1.BootstrapDataNotFoundReason,
+				message: fmt.Sprintf("Bootstrap data Secret %s does not exist, and the pod namespace holds no copy", sourceKey),
+			}
+		}
+		return fmt.Errorf("failed to get the bootstrap data Secret %s: %w", sourceKey, err)
+	}
+	value := source.Data[bootstrapDataKey]
+	if len(value) == 0 {
+		return &machineProblem{
+			reason:  infrav1.BootstrapDataNotFoundReason,
+			message: fmt.Sprintf("Bootstrap data Secret %s has no %q data", sourceKey, bootstrapDataKey),
+		}
+	}
+
+	secretCopy := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: key.Namespace, Name: key.Name, Labels: labels},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{bootstrapDataKey: value},
+	}
+	if err := r.client.Create(ctx, secretCopy); err != nil {
+		// Also for "already exists": the next reconcile reads the object and
+		// checks whose it is before a pod mounts it.
+		return createProblem("Secret", key, err)
+	}
+	logger.Info("Copied the bootstrap data into the pod namespace", "secret", key.Name, "podNamespace", key.Namespace)
+	return nil
+}
+
+// ensureClaim makes one volume claim when it does not exist. A claim that
+// exists stays as it is: it holds the state of the node.
+func (r *MachineReconciler) ensureClaim(
+	ctx context.Context,
+	machine *infrav1.PodVMMachine,
+	claim *corev1.PersistentVolumeClaim,
+	logger *slog.Logger,
+) error {
+	key := client.ObjectKeyFromObject(claim)
+	existing := &corev1.PersistentVolumeClaim{}
+	err := r.apiReader.Get(ctx, key, existing)
+	if err == nil {
+		if !ownedBy(existing, machine) {
+			return resourceConflict("PersistentVolumeClaim", key)
+		}
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to get PersistentVolumeClaim %s: %w", key, err)
+	}
+
+	if err := r.client.Create(ctx, claim); err != nil {
+		return createProblem("PersistentVolumeClaim", key, err)
+	}
+	logger.Info("Made a volume claim", "claim", key.Name, "podNamespace", key.Namespace)
+	return nil
 }
 
 // buildClaim builds one volume claim with the volume mode Block. The node

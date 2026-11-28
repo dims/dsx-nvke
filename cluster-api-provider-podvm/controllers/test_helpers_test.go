@@ -205,11 +205,53 @@ func getInfraMachine(t *testing.T, k8sClient client.Client, name string) *infrav
 	return machine
 }
 
+func getPod(t *testing.T, k8sClient client.Client, name string) *corev1.Pod {
+	t.Helper()
+	pod := &corev1.Pod{}
+	require.NoError(t, k8sClient.Get(context.Background(),
+		client.ObjectKey{Namespace: testPodNamespace, Name: name}, pod))
+	return pod
+}
+
 // requireGone asserts that an object of the pod namespace does not exist.
 func requireGone(t *testing.T, k8sClient client.Client, obj client.Object, name string) {
 	t.Helper()
 	err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: testPodNamespace, Name: name}, obj)
 	require.True(t, apierrors.IsNotFound(err), "expected %T %s to be gone, got %v", obj, name, err)
+}
+
+// setPodPhase plays the part of the kubelet. A pod in the phase Running has
+// its container, and the startup probe of that container has not passed: the
+// virtual machine boots and no node agent answers.
+func setPodPhase(t *testing.T, k8sClient client.Client, name string, phase corev1.PodPhase) {
+	t.Helper()
+	pod := getPod(t, k8sClient, name)
+	pod.Status.Phase = phase
+	pod.Status.ContainerStatuses = nil
+	if phase == corev1.PodRunning {
+		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "node", Started: ptr.To(false)}}
+	}
+	require.NoError(t, k8sClient.Status().Update(context.Background(), pod))
+}
+
+// startNodeAgent plays the kubelet at the moment the startup probe passes: the
+// pod runs and the node agent in it accepts a connection.
+func startNodeAgent(t *testing.T, k8sClient client.Client, name string) {
+	t.Helper()
+	pod := getPod(t, k8sClient, name)
+	pod.Status.Phase = corev1.PodRunning
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "node", Started: ptr.To(true)}}
+	require.NoError(t, k8sClient.Status().Update(context.Background(), pod))
+}
+
+// reconcileUntilNodeAgentAnswers takes a new machine to the state "the node is
+// up": the first reconcile makes the pod, the node agent in it starts to
+// answer, the second reconcile sees it.
+func reconcileUntilNodeAgentAnswers(t *testing.T, reconciler *MachineReconciler, k8sClient client.Client, name string) {
+	t.Helper()
+	reconcileMachine(t, reconciler, name)
+	startNodeAgent(t, k8sClient, name)
+	reconcileMachine(t, reconciler, name)
 }
 
 func requireReadyCondition(t *testing.T, conditions []metav1.Condition, status metav1.ConditionStatus, reason string) {
