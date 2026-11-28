@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Values for the chart of the local static provisioner 2.10.0, for the kind
+# host cluster of cluster-api-provider-podvm. up.sh installs the chart with
+# them.
+#
+# One storage class in block mode. up.sh puts one link for each loop device
+# into /mnt/podvm-disks of a kind worker, and the provisioner makes one volume
+# for each link. A machine of the provider takes two of them, and the volumes
+# stay on the host node of the link.
+classes:
+  - name: podvm-block
+    hostDir: /mnt/podvm-disks
+    volumeMode: Block
+    # A released volume is discarded and offered again. On a loop device over
+    # a sparse file that gives the space back. The default of the chart writes
+    # the whole device two times.
+    blockCleanerCommand:
+      - /scripts/blkdiscard.sh
+    storageClass: true
