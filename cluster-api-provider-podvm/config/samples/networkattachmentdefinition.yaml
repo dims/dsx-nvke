@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# A NetworkAttachmentDefinition that fits the pod contract of the provider.
+#
+# The provider writes the address and the hardware address of each pod into
+# the Multus annotation of the pod. So the attachment must take both from the
+# annotation: the capabilities "ips" and "mac", and the static IPAM plugin.
+# It gives no gateway and no masquerade: the default route of a pod stays on
+# its first interface.
+#
+# The bridge is an example. It is a bridge of each host node that is on the
+# node network.
+apiVersion: k8s.cni.cncf.io/v1
+kind: NetworkAttachmentDefinition
+metadata:
+  name: nodenet
+  namespace: example-pods
+spec:
+  config: |
+    {
+      "cniVersion": "1.0.0",
+      "name": "nodenet",
+      "plugins": [
+        {
+          "type": "bridge",
+          "bridge": "br-nodenet",
+          "isGateway": false,
+          "isDefaultGateway": false,
+          "ipMasq": false,
+          "hairpinMode": false,
+          "capabilities": {"ips": true, "mac": true},
+          "ipam": {"type": "static"}
+        }
+      ]
+    }

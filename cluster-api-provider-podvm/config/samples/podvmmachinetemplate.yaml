@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# A PodVMMachineTemplate for control plane machines.
+#
+# Every value is an example. The image is a node image that meets the pod
+# contract of the README, for the Kubernetes version of the cluster request.
+# The storage class must give block volumes.
+#
+# With the NVKE controller, send the object as
+# controlPlaneConfig.infra.machineTemplate of the cluster request.
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: PodVMMachineTemplate
+metadata:
+  name: example-control-plane
+  namespace: nvke-system
+spec:
+  template:
+    spec:
+      image: registry.example.com/nvke/podvm-node:1.36.3
+      resources:
+        cpu: "4"
+        memory: 8Gi
+      volumes:
+        var:
+          storageClassName: block-storage
+          size: 40Gi
+        etcd:
+          storageClassName: block-storage
+          size: 10Gi

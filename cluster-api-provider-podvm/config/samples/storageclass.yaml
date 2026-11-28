@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# A storage class for the two block volumes of a machine.
+#
+# The name is the storageClassName of podvmmachinetemplate.yaml. The class
+# binds a volume at the first use. So the scheduler picks the host node of a
+# pod first, in the failure domain of the machine, and the volume follows.
+#
+# The provisioner is an example. This one makes no volume: an operator makes
+# one PersistentVolume with the volume mode Block for each block device of a
+# host node. A CSI driver that makes block volumes on demand has its own
+# provisioner name.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: block-storage
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
