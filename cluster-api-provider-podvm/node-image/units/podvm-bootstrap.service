@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Part 1 of the bootstrap data of the NVKE controller: the files. They hold the
+# SPIRE agent configuration and the node agent settings, so this unit comes
+# before both agents.
+[Unit]
+Description=Write the files of the NVKE bootstrap data
+After=local-fs.target
+Before=spire-agent.service nvke-agent.service podvm-bootstrap-final.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=/run/podvm/env
+ExecStart=/usr/local/bin/podvm-bootstrap -phase files
+
+[Install]
+WantedBy=multi-user.target
