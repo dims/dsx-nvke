@@ -406,6 +406,12 @@ ARP/BGP-ECMP paths that would strand worker kubelets) → optionally stop kube-a
 the VIP back on `lo`. Manifest moves are the control mechanism (kubelet reacts to
 `/etc/kubernetes/manifests` changes); restore verifies backup hashes for idempotence.
 
+With `--control-plane-endpoint-gate-file` set, the shutdown first takes the node
+out of a load balancer it does not run: create the gate file → wait the settle
+time → close established remote `backend:6443` sockets → verify the same quiet
+window. `StartKubeVipRestore` then also removes the gate file. See
+[Control plane endpoint gate](../README.md#control-plane-endpoint-gate).
+
 ### 9.5 Bundles / packages / collections
 - **Bundles:** semver-versioned tgz artifacts resolved through an index
   (`ubuntu_22/24_index.json`) from S3/HTTP or OCI; installed by running an install

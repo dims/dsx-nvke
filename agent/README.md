@@ -47,6 +47,9 @@ Important flags (also settable via env; see `AGENT_ARGS`):
 | `--disable-mtls` | Plaintext gRPC (**development only**) |
 | `--spiffe-socket-path` | SPIFFE workload API socket. Used for the gRPC server's mTLS unless `--disable-mtls` is set, and always by the SPIRE agent RPCs |
 | `--secure-server-port` | gRPC listen port (default `15005`) |
+| `--control-plane-endpoint-gate-file` | Optional. Absolute path of the [control plane endpoint gate](#control-plane-endpoint-gate) file. Empty means no gate |
+| `--control-plane-endpoint-backend-interface` | Interface on which the connections of the load balancer arrive. Required with the gate file |
+| `--control-plane-endpoint-gate-settle` | Time between closing the gate and closing the established connections (default `10s`) |
 | `--version` | Print build version and exit |
 
 Example:
@@ -67,6 +70,43 @@ the bundle server URL (for example
 `nke_bundles/Ubuntu_24.04/kubeadm_v1.30.0.tgz`).
 
 gRPC reflection is enabled on the same port (useful with `grpcurl`).
+
+### Control plane endpoint gate
+
+A control plane node behind a load balancer that it does not run, for example a
+Service of another cluster, has no kube-vip to withdraw. With
+`--control-plane-endpoint-gate-file` set, the agent withdraws such a node
+through a gate file. With no gate file it withdraws only kube-vip.
+
+On `StartK8sControlPlaneNodeGracefulShutdown` and `StartEtcdDefrag` the agent
+creates the gate file, waits the settle time, closes the established
+connections of remote clients on the IPv4 address of the backend interface and
+port 6443 (`ss -K`), and checks for 30 seconds that no new connection arrives
+there. A new connection fails the withdrawal. `StartKubeVipRestore` removes the
+gate file. A node with kube-vip and a gate leaves both, the gate first.
+
+The agent cannot see the load balancer, so the deployment has to provide:
+
+- A health check that fails while the gate file exists, and that passes only
+  when the file is gone and `/readyz` of the local API server answers 200. It
+  must not connect to the backend address from another host.
+- A backend interface that carries only the connections of the load balancer.
+  Clients in the cluster reach the API server on another address.
+- One global IPv4 address on the backend interface. IPv6 is not handled.
+- A kernel with `INET_DIAG`, `INET_TCP_DIAG` and `INET_DIAG_DESTROY`. Without
+  them `ss -K` closes nothing and reports no error. The withdrawal then fails
+  at the check for new connections, which also sees a connection that stayed.
+- A settle time longer than the health check needs to take the node out.
+
+The content of the gate file says who opens the gate:
+
+- `/etc/kubernetes/manifests-backup`: a caller, with `StartKubeVipRestore`. The
+  gate stays closed until then, also over a restart of the agent. Over a reboot
+  of the node it stays closed only when the gate file is on a path that the
+  reboot does not clear.
+- `/etc/kubernetes/manifests-backup/etcd-defrag`: the agent, at the end of the
+  defragmentation or at its next start.
+- Other content, such as a file made by hand: a caller.
 
 ### Logs
 
