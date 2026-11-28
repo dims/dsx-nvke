@@ -59,6 +59,7 @@ cd "$(dirname "$0")/.."
 # Moving a Dockerfile out of this list is the decision to publish it.
 EXEMPT=(
 	cli/e2e/bootstrap/substrate/node/Dockerfile        # e2e substrate, built and discarded per run
+	cluster-api-provider-podvm/node-image/Dockerfile   # pod node image, built on the local CAPD node image
 	controller/hack/Dockerfile.controller.tilt                # Tilt inner loop, local only
 	controller/hack/capd-kindest-node/Dockerfile       # CAPD node image, tag selected per k8s version
 	controller/hack/dsx-imds-attestation/Dockerfile.mock # Tilt-only IMDS fixture

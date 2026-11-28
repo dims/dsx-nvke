@@ -1,0 +1,122 @@
+#!/bin/bash
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Entry point of the node image for pod machines. It runs as PID 1 with no
+# arguments. It gives the node what a machine has at its start, and then starts
+# the entry point of the base image and systemd. The pod contract is in the
+# section "The pod" of ../README.md.
+set -o errexit -o nounset -o pipefail
+
+STATE=/var/lib/podvm/state # node state from outside /var, kept on the /var volume
+
+log() { echo "podvm-entrypoint: $*" >&2; }
+
+if [ "${PODVM_MACHINE_NAME:-}" != "$(hostname)" ]; then
+  log "ERROR: the hostname $(hostname) is not PODVM_MACHINE_NAME (${PODVM_MACHINE_NAME:-not set}). The node would register with another name."
+  exit 1
+fi
+
+# containerd gives a privileged container the cgroup namespace of its host
+# (cgroup v2). The entry point of the base image and the kubelet need a private one.
+if [ -f /sys/fs/cgroup/cgroup.controllers ] && [ "$(cat /proc/self/cgroup)" != "0::/" ]; then
+  if [ -n "${PODVM_CGROUPNS:-}" ]; then
+    log "ERROR: the cgroup namespace is still not private: $(cat /proc/self/cgroup)"
+    exit 1
+  fi
+  export PODVM_CGROUPNS=new
+  exec unshare --cgroup -- "$0" "$@"
+fi
+if [ -n "${PODVM_CGROUPNS:-}" ]; then
+  # The old mount shows the tree of the old namespace.
+  umount /sys/fs/cgroup
+  mount -t cgroup2 -o rw,nosuid,nodev,noexec,relatime cgroup2 /sys/fs/cgroup
+  unset PODVM_CGROUPNS
+fi
+
+# A machine starts with an empty /run and /tmp in memory.
+mount -t tmpfs -o mode=755,nosuid,nodev tmpfs /run
+mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /tmp
+
+# Make ext4 on a volume device that has no filesystem yet. The helper stops the
+# start when it cannot tell, so that it never formats a volume with data.
+format_if_empty() {
+  if [ ! -b "$1" ]; then
+    log "ERROR: $1 is not a block device. The pod must give /dev/podvm-var and /dev/podvm-etcd."
+    exit 1
+  fi
+  /usr/local/lib/podvm/format-if-empty "$1" "$2"
+}
+
+# /var: the first use of the volume copies the /var of the image to it.
+format_if_empty /dev/podvm-var podvm-var
+mkdir -p /mnt/podvm-var
+mount /dev/podvm-var /mnt/podvm-var
+if [ ! -e /mnt/podvm-var/.podvm-var-copied ]; then
+  cp -a /var/. /mnt/podvm-var/
+  touch /mnt/podvm-var/.podvm-var-copied
+fi
+umount /mnt/podvm-var
+mount /dev/podvm-var /var
+
+# /var/lib/etcd: kubeadm stops when the etcd folder is not empty, and a new
+# ext4 has a lost+found folder.
+format_if_empty /dev/podvm-etcd podvm-etcd
+mkdir -p /var/lib/etcd
+mount /dev/podvm-etcd /var/lib/etcd
+chmod 700 /var/lib/etcd
+if [ ! -d /var/lib/etcd/member ] && [ -d /var/lib/etcd/lost+found ]; then
+  rmdir /var/lib/etcd/lost+found
+fi
+
+# A new container starts from the image. These paths must stay through a new
+# pod, so they live on the /var volume: the files of kubeadm, the SPIRE agent
+# configuration (its join token works one time), and the node files of the base
+# image entry point. For /kind the files of the image win, and the node files stay.
+keep_on_volume() {
+  mkdir -p "$STATE$1"
+  cp "$2" "$1/." "$STATE$1/"
+  mount --bind "$STATE$1" "$1"
+}
+keep_on_volume /etc/kubernetes -an
+keep_on_volume /etc/spire-agent -an
+keep_on_volume /kind -a
+
+# systemd in a container takes the machine ID from container_uuid. One UUID on
+# the volume gives the node the same machine ID at each start.
+if [ ! -s "$STATE/machine-uuid" ]; then
+  cat /proc/sys/kernel/random/uuid >"$STATE/machine-uuid"
+fi
+container_uuid=$(cat "$STATE/machine-uuid")
+export container_uuid
+
+# The base image entry point rewrites manifests and certificates when the pod
+# IP is not the address in these files. The node address is the fixed address,
+# and the pod IP is in no manifest and no certificate.
+rm -f /kind/old-ipv4 /kind/old-ipv6
+
+# What a node gets from the kernel of its host. The inotify limits are values
+# of the whole kernel, so raise them only in a Kata guest, which has its own.
+raise() {
+  if [ "$(sysctl -n "$1")" -lt "$2" ]; then sysctl -q -w "$1=$2"; fi
+}
+if grep -q -E '(^| )agent\.|kata-containers' /proc/cmdline; then
+  raise fs.inotify.max_user_instances 8192
+  raise fs.inotify.max_user_watches 1048576
+fi
+sysctl -q -w net.ipv4.ip_forward=1 # kubeadm stops without it
+if [ ! -e /dev/kmsg ]; then
+  mknod -m 600 /dev/kmsg c 1 11 # the kubelet reads it
+fi
+
+# systemd does not give the variables of PID 1 to a unit. The bootstrap units
+# read this file.
+mkdir -p /run/podvm
+echo "PODVM_MACHINE_NAME=$PODVM_MACHINE_NAME" >/run/podvm/env
+
+# The CNI of the host cluster sets the node address before this container starts.
+if ! ip -o -4 addr show dev "${PODVM_NODE_INTERFACE:-net1}" 2>/dev/null | grep -q -F " ${PODVM_NODE_ADDRESS:-} "; then
+  log "WARN: the node address ${PODVM_NODE_ADDRESS:-} is not on ${PODVM_NODE_INTERFACE:-net1}"
+fi
+
+exec /usr/local/bin/entrypoint /sbin/init
