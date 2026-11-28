@@ -2,10 +2,10 @@
 
 State of 2026-11-28. The guide uses two public branches:
 
-- `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `8c957317`
+- `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `98c84fac`
 - `integration/control-plane-kata-pods` of `https://github.com/dims/kata-containers`, at `96a8d905b`
 
-**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Each of the ten scenarios passed. Scenario 6 passed at its second try, on a cluster that was made again: "Known obstacles" has why. A mark on each step and each scenario says how it ran. Expect to find faults, and tell us where.
+**Each step and each scenario of this path passed in the first run of the guide, on 2026-11-28, but not in one pass.** Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). A second pass at the end ran steps 7 to 13 in one go from the public tip, and each passed. Each of the ten scenarios passed. Scenario 6 passed at its second try, on a cluster that was made again: "Known obstacles" has why. The tips moved during the run, as the fixes came in. A run of the whole path in one pass from one tip is still open. A mark on each step and each scenario says how it ran. Expect to find faults, and tell us where.
 
 ## What the feature is
 
@@ -43,7 +43,7 @@ State of 2026-11-28. A first run is in work, on one arm64 machine with `/dev/kvm
 - **New.** It never ran in any form.
 - **Ran in the first run of 2026-11-28.** The step passed as this guide has it, in the first run of the guide on one machine.
 
-A mark says nothing about this path as a whole. The first run is not at its end.
+A mark says nothing about this path as a whole. No run did the whole path in one pass.
 
 ## Part 1, set up
 
@@ -403,8 +403,8 @@ load podvm-node:v1.37.0
 ```
 
 - **Pass.** NVKE replaces each control plane node. `kc get nodes` shows `v1.37.0` on the three control plane nodes, and the cluster is `Provisioned`. The worker keeps its version.
-- **Time.** In the first run the two image builds took 44 s and 24 s, the load 2 min 3 s, and the upgrade 12 min 44 s.
-- The loop of scenario 5 on the API had 740 of 742 calls with an answer. Two calls failed within 6 s, when NVKE ran the last upgrade step on the newest node and its etcd started again.
+- **Time.** In the first run the two image builds took 44 s and 24 s, the load 2 min 3 s, and the upgrade 12 min 44 s. A second run, with the fix of the gate around the last upgrade step, took 13 min 5 s.
+- The loop of scenario 5 on the API had 740 of 742 calls with an answer at the first run. Two calls failed within 6 s, when NVKE ran the last upgrade step on the newest node and its etcd started again. The node agent now takes the node out of the shared address for that step. The second run had 768 of 768 calls with an answer.
 - A load of a second node image takes about 12 GB of disk in the four kind nodes.
 
 ### Scenario 9, workers from the simulator
