@@ -1,8 +1,8 @@
 # Branches to share: NVKE control plane nodes as Kata pods
 
-Last update: 2026-11-28, 11:40 local time. Each tip in the state table was the tip of its branch on the fork at that time (fetched at 11:40).
+Last update: 2026-11-28, 12:15 local time. Each tip in the state table was the tip of its branch on the fork at that time (fetched at 12:15).
 
-This page lists the only branches that the larger team needs. Each of the eleven is meant to become one pull request. No pull request is open yet. One more branch, `integration/control-plane-kata-pods`, holds the commits of the ten NVKE branches together, for a person who wants to try the feature. It is not for a pull request. Every other branch on the two forks is lab material and is not for sharing.
+This page lists the only branches that the larger team needs. Each of the eleven is meant to become one pull request. No pull request is open yet. A twelfth branch, `feat/podvm-arm64`, holds the fixes for arm64 while the first run on an arm64 machine is in work. Its commits go into branches 9 and 11 when both runs are through. One more branch, `integration/control-plane-kata-pods`, holds the commits of the ten NVKE branches together, for a person who wants to try the feature. It is not for a pull request. Every other branch on the two forks is lab material and is not for sharing.
 
 - NVKE branches are on the fork `dims/dsx-nvke` and go to `dsx-ai-factory/nvke`. All sit on the main commit `d625fcfa`. The fork has one version tag, `v0.24.0-beta.18`, since 2026-11-28. A build of the node agent takes its version from the nearest such tag, and the controller checks that version.
 - The Kata branch is on the fork `dims/kata-containers` and goes to `kata-containers/kata-containers`.
@@ -22,6 +22,7 @@ This page lists the only branches that the larger team needs. Each of the eleven
 | 9 | `feat/podvm-node-image` | `27806a56` | 3, on top of branch 8 | 1,253 added, 2 removed | The image ran in a pod for the first time on 2026-11-28: three control plane nodes of the first cluster of the try-out guide. No fault showed. Still to show in that run: a second start of a pod on its volumes, and the gate in action |
 | 10 | `fix/agent-kill-child-cgroups` (Kata) | `e0f5597` | 1 | 161 added, 6 removed | Ready |
 | 11 | `feat/podvm-deploy-path` | `8c68658d` | 18, on top of branch 9 | 1,886 added, 2 removed | In its first run on a cluster since 2026-11-28. All 13 set up steps of the guide and the first cluster request passed, three set up steps after a small fix of this branch. The other scenarios are in work |
+| 12 | `feat/podvm-arm64` | `ff0bc3e8` | 6, on top of branch 11 | 70 added, 15 removed | New on 2026-11-28, and not a branch for a pull request of its own. The fixes that a reading of the tree showed for arm64, before any step ran there. The first run on an arm64 machine is in work |
 
 "Ready" means that the commits are final in content. After the rework, all branches are built together again and the lab tests run again. This page gets the result.
 
@@ -45,17 +46,18 @@ Before a pull request, each branch still needs these things. They are rules of t
 5. Branch 9 stacks on branch 8.
 6. Branch 10 is for another project and has no order with the rest.
 7. Branch 11 stacks on branch 9 and goes last. Its last commit also needs branch 5 below it.
+8. Branch 12 stacks on branch 11 for now. It is a holding place: four of its commits belong to branch 11 and two to branch 9.
 
 ## The integration branch
 
 https://github.com/dims/dsx-nvke/tree/integration/control-plane-kata-pods
 
-- What it is: the commits of branches 1 to 7 and of branch 11 (which brings branches 8 and 9), picked in the order above onto the main commit `d625fcfa`. It has no code of its own. Tip `7da67615`, 60 commits.
+- What it is: the commits of branches 1 to 7 and of branch 12 (which brings branches 8, 9 and 11), picked in the order above onto the main commit `d625fcfa`. It has no code of its own. Tip `8bc32175`, 66 commits.
 - What it is for: one tree to build the agent, the controller, the simulator, the provider and the node image from, with the deploy path and the kind host cluster scripts, for a person who wants to try the feature. It is not for a pull request and not for review.
 - One place differs from the branches: branch 1 and branch 6 each add a field at the end of the same struct in `agent/internal/agent/agent.go`. The integration branch has both fields. The README of the simulator has the lines of branch 3 and of branch 11, and the docs page on infrastructure providers has the lines of branch 7 and of branch 11. Each other file that a branch changes is the same as in that branch.
 - It is built again after each change of a branch, so its history is rewritten. Do not base work on it.
 - The guide for a first run is `try-it.md`, next to this page. It is written for a person outside the team who has only the two public forks. Nothing of it ran from start to end yet, and each step has a mark for what ran.
-- Check at 10:43 on 2026-11-28: `make build` passes for all modules and the docs check passes. The first run of the guide cloned this branch on a test machine with no credentials, built each part from it, and made its first cluster from the tip `e6ff4e4b`.
+- Check at 12:14 on 2026-11-28: `make build` passes for all modules, the CLI test decodes both example requests of branch 11, and the deploy list, docs, shell lint, license header and name checks pass. The first run of the guide on amd64 cloned this branch with no credentials, built each part from it, and made its first cluster from the tip `e6ff4e4b`. Against that tip the tree of now differs in five files, each for arm64 or for a text.
 - Kata Containers has its own integration branch, because the guest needs two changes of the Kata agent: https://github.com/dims/kata-containers/tree/integration/control-plane-kata-pods (tip `96a8d905b`). It is Kata 4.4.0 plus the commit of branch 10 and a backport of the upstream pull request 13627 of another author (still open on 2026-11-28, as is the upstream issue 14062 for the fault of branch 10), which lets an exec work after systemd starts in the container.
 
 ## What each branch does
@@ -282,3 +284,25 @@ The branch adds what a person needs, beyond the provider and its node image, to 
 - The first cluster request of the guide passed in that run, from the public tip with no local patch: `nvkectl create cluster` with the example of this branch gave three control plane nodes and one worker, each Ready after 5 minutes and 37 seconds. The Service that the provider makes had its address after 11 seconds. MetalLB announces the address on the node network. The worker of the simulator has one network. Each control plane node pulled images from a public registry by itself.
 - Open, in the same run: the other nine scenarios, the clean up with a check for loop devices that stay, and one clean pass of steps 7 to 13 from the public tip in one go.
 - Open, for the product: with OIDC on, the provider needs the SPIFFE program and socket in its pod to reach a cluster, as the Cluster API controllers get them from `controller/deploy/k8s/capi-spiffe-exec-auth`. The path turns OIDC off, as the lab did. The provider is not an item of the path: it installs with `kubectl apply -k` before it, because no image of the provider is published. No CI lane uses the path yet.
+
+### 12. `feat/podvm-arm64`
+
+https://github.com/dims/dsx-nvke/tree/feat/podvm-arm64
+
+The branch holds what arm64 needs, on top of branch 11. Nobody ran any part of this work on arm64 before 2026-11-28. A reading of the tree and of Kata Containers 4.4.0 showed seven places that assume amd64, and one of them is large: Kata 4.4.0 has Cloud Hypervisor with its Rust runtime for amd64 only, so on arm64 the runtime class sits on QEMU, which no test of this work ran before. Cloud Hypervisor stays on amd64, where each result so far is.
+
+Each commit keeps what a reader on amd64 gets: the commands print and select the same on amd64 as before, and the Kata chart renders byte for byte the same with the amd64 values.
+
+- `96e7a5d1` docs(hack): build and load images for the architecture of the machine
+  - The README of the kind host cluster built the controller image and the provider image for `linux/amd64` and loaded images for that platform. On arm64 two of these would build an amd64 image with no error. Now the platform is the one of the machine.
+- `a3837e12` feat(hack): put the kata-podvm runtime on QEMU on arm64
+  - A second values file for the Kata chart, which `up.sh` adds on arm64: the QEMU shim of the Rust runtime in the place of the Cloud Hypervisor one, with the same guest kernel, guest image and block device setting. The runtime class keeps its name, `kata-podvm`.
+- `dceca455` fix(hack): give a kind node on arm64 a /dev/shm for QEMU guests
+  - Under QEMU the memory of each guest is a file in `/dev/shm`, and Docker gives a container 64 MB there. On arm64 `up.sh` sets the limit to half of the memory, as a Linux machine has it. A kind node on amd64 stays as it was.
+- `47f9c0ac` docs(podvm): take the architecture of the machine in the node image builds
+  - The README of the node image named `x86_64` for the kernel build and `amd64` for a bundle and two packages. Its home is branch 9.
+- `a3c6ce8b` docs(hack): say on which architecture the kind host cluster is tested
+- `ff0bc3e8` docs(podvm): say on which architecture the node image is tested
+  - Both texts say: tested on amd64, and on arm64 the first run is in work. The home of the second is branch 9.
+- Proof so far: checks on the workstation only, with no pull and no cluster. The repository checks pass at the tip.
+- Open: everything on arm64. The first run there is in work on a real arm64 machine with KVM. Not known until it runs: a pod on QEMU in a kind node, systemd in the guest, the two raw block volumes with direct I/O, the exec probe, a pod that stops in seconds, the eleven kernel options on arm64, the guest image build, and the arm64 form of each upstream image.
