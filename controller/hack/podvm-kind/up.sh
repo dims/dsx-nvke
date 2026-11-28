@@ -22,6 +22,7 @@
 #   storage    loop devices and the local static provisioner in block mode
 #
 # Not in the default run:
+#   sim        start the NICo simulator, with its workers on the node network
 #   env        print the settings that deploy-stack.sh needs for this cluster
 #
 # Every step can run again. Nothing here survives a restart of the machine or
@@ -55,6 +56,7 @@ NODE_SUBNET=172.28.0.0/16
 NODE_IP_RANGE=172.28.0.0/24
 NODE_BRIDGE=br-nodenet
 NODE_IFNAME=nodenet0
+NICO_SIM_PORT=18080
 
 log() { printf '\n=== %s\n' "$*" >&2; }
 die() { printf 'podvm-kind: %s\n' "$*" >&2; exit 1; }
@@ -218,6 +220,46 @@ step_storage() {
     --values "${HERE}/local-static-provisioner-values.yaml" --wait --timeout 5m
 }
 
+kind_gateway() {
+  docker network inspect kind -f '{{range .IPAM.Config}}{{println .Gateway}}{{end}}' \
+    | grep -Eo '^[0-9]+(\.[0-9]+){3}$' | head -n 1
+}
+
+# The simulator runs on this machine and listens on the gateway of the kind
+# network, where CAPNICo reaches it. A worker is a container on the node
+# network alone, so it has the node address that the tunnels of the pod network
+# need, and it reaches the control plane Service and the SPIRE server there.
+step_sim() {
+  local sim="${REPO}/controller/nico-sim" gateway _
+  gateway="$(kind_gateway)"
+  [[ -n "${gateway}" ]] || die "cannot read the gateway of the Docker network kind"
+  [[ -e /sys/module/openvswitch ]] || as_root modprobe openvswitch
+  if curl -fsS -m 2 "http://${gateway}:${NICO_SIM_PORT}/healthz" >/dev/null 2>&1; then
+    log "something answers on ${gateway}:${NICO_SIM_PORT} already"
+    return 0
+  fi
+  log "building and starting nico-sim on ${gateway}:${NICO_SIM_PORT}"
+  make -C "${sim}" build >/dev/null
+  mkdir -p "${STATE_DIR}/nico-sim"
+  (
+    cd "${sim}"
+    export NICO_SIM_LISTEN_ADDR="${gateway}:${NICO_SIM_PORT}" NICO_SIM_DB_PATH="${STATE_DIR}/nico-sim/nico-sim.db"
+    export NICO_SIM_FILES_DIR="${STATE_DIR}/nico-sim/files" NICO_SIM_SEED_PATH="${sim}/internal/seed/default-seed.yaml"
+    export NICO_VMS_VM_BACKEND=mock NICO_VMS_BGP_ENABLED=false NICO_VMS_CONSOLE_SSH_PORT=-1
+    export NICO_VMS_BRIDGE_CIDR="${NICO_VMS_BRIDGE_CIDR:-172.30.0.0/24}"
+    export NICO_CONTAINERS_ENABLED=true NICO_CONTAINERS_REQUIRE_HEALTHY=true
+    export NICO_CONTAINERS_NODE_NETWORK="${NODE_NETWORK}" NICO_CONTAINERS_SPIRE_ATTESTATION_METHOD=joinToken
+    export NICO_CONTAINERS_NODE_IMAGE="${CAPD_KINDEST_NODE_IMAGE:-cwe-capd-kindest-node:local}"
+    nohup ./bin/nico-sim >"${STATE_DIR}/nico-sim/nico-sim.log" 2>&1 &
+    echo $! >"${STATE_DIR}/nico-sim/nico-sim.pid"
+  )
+  for _ in $(seq 1 30); do
+    curl -fsS -m 1 "http://${gateway}:${NICO_SIM_PORT}/healthz" >/dev/null 2>&1 && return 0
+    sleep 1
+  done
+  die "nico-sim did not answer; the log is ${STATE_DIR}/nico-sim/nico-sim.log"
+}
+
 # The address of the control plane node of the host cluster on the node
 # network. A node of a tenant cluster reaches the SPIRE server there.
 step_env() {
@@ -240,7 +282,7 @@ if [[ $# -eq 0 ]]; then
 fi
 for step in "$@"; do
   case "${step}" in
-    host | network | cluster | nodes | multus | kata | metallb | storage | env) "step_${step}" ;;
+    host | network | cluster | nodes | multus | kata | metallb | storage | sim | env) "step_${step}" ;;
     *) die "unknown step ${step}: see the header of $0" ;;
   esac
 done
