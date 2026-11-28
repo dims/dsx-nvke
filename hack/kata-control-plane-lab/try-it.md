@@ -146,13 +146,6 @@ kh get pv
 
 - **See.** Four nodes that are Ready. The runtime class. The attachment `nodenet`. MetalLB pods that run. Twelve volumes with the status `Available` and the class `podvm-block`, six of 20Gi and six of 8Gi.
 - **If not.** The script stops at the first fault and names the step. Correct the cause and run that step again. With fewer than twelve volumes, read the logs of the pods in the namespace `local-static-provisioner`.
-- **Known at the tip `9b82daf4`.** The step `kata` ends with `DEFAULT_SHIM 'qemu-runtime-rs' must be one of the configured SHIMS` in the log of the job `kata-deploy-install-dispatcher`. Add these three lines to `controller/hack/podvm-kind/kata-deploy-values.yaml`, at the top level, and run `up.sh kata metallb storage`. A later tip has them.
-
-  ```yaml
-  defaultShim:
-    amd64: clh-runtime-rs
-    arm64: clh-runtime-rs
-  ```
 
 ### 8. Check Kata
 
