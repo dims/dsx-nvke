@@ -161,6 +161,18 @@ func TestPodVMClusterRulesAboutAChange(t *testing.T) {
 			refusal: "runtimeClassName is immutable",
 		},
 		{
+			name:    "another network attachment",
+			change:  func(spec map[string]any) { spec["networkAttachment"] = map[string]any{"name": "othernet"} },
+			refusal: "networkAttachment is immutable",
+		},
+		{
+			name: "the same network attachment name in another namespace",
+			change: func(spec map[string]any) {
+				spec["networkAttachment"] = map[string]any{"name": "nodenet", "namespace": "networks"}
+			},
+			refusal: "networkAttachment is immutable",
+		},
+		{
 			name: "another address block",
 			change: func(spec map[string]any) {
 				spec["addressRange"] = map[string]any{"cidr": "198.51.100.128/26", "prefixLength": int64(24)}

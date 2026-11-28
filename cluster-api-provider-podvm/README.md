@@ -110,6 +110,7 @@ the volumes of its old pod. The API server refuses a change of these fields:
 | `addressRange` | The machines that exist hold addresses of the old block |
 | `controlPlaneService` | See [The control plane Service](#the-control-plane-service) |
 | `runtimeClassName` | The next pod of each machine would run in another runtime. What the RuntimeClass names can change in the host cluster, for example with a new version of Kata |
+| `networkAttachment` | The next pod of each machine would be on another network than the pods that still run, with an address of the same block |
 
 ### The control plane Service
 
