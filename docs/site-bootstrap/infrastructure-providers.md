@@ -191,6 +191,20 @@ SPIRE needs the `dsx_imds` node attestor on both sides:
 
 The ordering rule above applies here too: the NVKE controller checks for the `LaunchLayerMachine` CRD once, at process start, and skips the LaunchLayer SPIFFE controller when it is absent. Install CAPLL before the controller, or restart the controller after it.
 
+## Pod VM
+
+`cluster-api-provider-podvm` runs the control plane nodes of a tenant cluster as pods of the cluster that runs Cluster API. Install Cluster API as in step 2, then install the provider as its [README](../../cluster-api-provider-podvm/README.md#install) describes. A cluster request reaches it through the `infra` object, which carries a `PodVMCluster` and a `PodVMMachineTemplate`.
+
+The management plane then has to accept `infra` requests and reach the provider's kinds. Set these chart values:
+
+| Value | Setting |
+|---|---|
+| `supportedInfraProviders` | Append `infra` to the existing value rather than replacing it. Without it the API rejects the request with 400 |
+| `capi.rbac.create` | `true`. It defaults to `false`, and the chart renders no CAPI or pod VM RBAC without it |
+| `capi.rbac.podvm` | `true`. It defaults to `false`. Grants the controller access to `podvmclusters`, `podvmmachines` and `podvmmachinetemplates`, and to their three CRDs by name |
+| `nodeAgent.spireAttestationMethod` | `joinToken`, which needs `spiffe.enabled` `true`. A pod has no TPM. The method applies to every provider's new nodes |
+| `env` | `NODE_REBOOT_SOFT_REBOOT_ENABLED` with the value `"false"`. The in-guest reboot that the controller tries first gives a pod no new boot ID, and with the default the controller waits up to 30 minutes for one before it asks the provider for a new pod |
+
 ## What This Page Does Not Cover
 
 - **The management plane (NVKE controller) install.** Separate step, and it must come after this one.
