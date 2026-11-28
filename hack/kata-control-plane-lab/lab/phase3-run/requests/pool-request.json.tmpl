@@ -1,0 +1,16 @@
+{
+  "clusterID": "${CLUSTER_ID}",
+  "name": "${POOL_NAME}",
+  "nodeNamePrefix": "${POOL_PREFIX}",
+  "controlPlane": false,
+  "desiredNodeCount": ${WORKER_COUNT},
+  "systemReservedMemory": "512Mi",
+  "infra": {
+    "machineTemplate": ${NICO_MACHINE_TEMPLATE},
+    "preKubeadmCommands": [
+      "n=0; until [ -S /run/systemd/private ] || [ $n -ge 600 ]; do n=$((n+1)); sleep 0.2; done; echo \"lab wait for systemd: $n steps of 0.2 s\"; [ -S /run/systemd/private ]",
+      "mkdir -p /run/cluster-api",
+      "echo success > /run/cluster-api/bootstrap-success.complete"
+    ]
+  }
+}

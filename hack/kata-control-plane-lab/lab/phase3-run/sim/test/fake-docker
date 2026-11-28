@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# fake-docker: a stand-in for the docker program, for the tests of docker-two-nets on the
+# workstation. It makes no container and no network. It records the arguments of each call and
+# keeps a small state in files, so that "ps", "inspect", "start" and "rm" answer as Docker does
+# for the calls that nico-sim and docker-two-nets make.
+#
+# State folder: $FAKE_DOCKER_STATE
+#   calls.log        one line for each call (shell quoted arguments)
+#   call-<n>.args    the arguments of call n, one after the other, each ended by a NUL byte
+#   c/<id>.json      one container, in the form of "docker inspect"
+#   stdin-<n>        the standard input of an "exec -i" call
+# FAKE_DOCKER_FAIL_INSPECT=1 makes each "inspect --format" call fail (for one test).
+set -euo pipefail
+S=${FAKE_DOCKER_STATE:?the state folder}
+mkdir -p "$S/c"
+
+# One number for each call. The lock keeps two calls apart.
+exec 8>>"$S/.seq.lock"
+flock 8
+n=$(( $(cat "$S/.seq" 2>/dev/null || echo 0) + 1 ))
+echo "$n" >"$S/.seq"
+{ printf '%s' "$n"; printf ' %q' "$@"; printf '\n'; } >>"$S/calls.log"
+printf '%s\0' "$@" >"$S/call-$n.args"
+flock -u 8
+
+cmd=${1:-}
+shift || true
+case "$cmd" in
+  info)
+    echo "29.1.3"
+    ;;
+  ps)
+    # ps -aq [--filter label=<key>=<value>]...
+    filters=()
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --filter) filters+=("${2#label=}"); shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    for f in "$S"/c/*.json; do
+      [ -e "$f" ] || continue
+      ok=1
+      for kv in "${filters[@]}"; do
+        k=${kv%%=*}; v=${kv#*=}
+        [ "$(jq -r --arg k "$k" '.Config.Labels[$k] // ""' "$f")" = "$v" ] || ok=0
+      done
+      if [ "$ok" = 1 ]; then basename "$f" .json; fi
+    done
+    ;;
+  create)
+    name="" image="" nets='{}' labels='{}'
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --name) name=$2; shift 2 ;;
+        --network)
+          spec=$2; shift 2
+          net=$spec; ip=""
+          if [[ "$spec" == *=* ]]; then
+            net=""
+            IFS=',' read -r -a parts <<<"$spec"
+            for p in "${parts[@]}"; do
+              case "$p" in name=*) net=${p#name=} ;; ip=*) ip=${p#ip=} ;; esac
+            done
+          fi
+          if [ -n "$ip" ]; then
+            nets=$(jq -c --arg n "$net" --arg ip "$ip" '.[$n] = {IPAddress: "", IPAMConfig: {IPv4Address: $ip}}' <<<"$nets")
+          else
+            nets=$(jq -c --arg n "$net" '.[$n] = {IPAddress: "", IPAMConfig: null}' <<<"$nets")
+          fi
+          ;;
+        --label) labels=$(jq -c --arg k "${2%%=*}" --arg v "${2#*=}" '.[$k] = $v' <<<"$labels"); shift 2 ;;
+        --hostname | --add-host | --security-opt | --tmpfs | --restart | --env | --volume | --entrypoint) shift 2 ;;
+        --privileged | --tty) shift ;;
+        -*) echo "fake-docker: create option $1 is not known to the fake" >&2; exit 125 ;;
+        *) image=$1; break ;;
+      esac
+    done
+    [ -n "$image" ] || { echo "fake-docker: create with no image" >&2; exit 125 ;}
+    # Docker refuses a second container with the same name.
+    for f in "$S"/c/*.json; do
+      [ -e "$f" ] || continue
+      if [ "$(jq -r '.Name' "$f")" = "/$name" ]; then echo "Error response from daemon: Conflict. The container name \"/$name\" is already in use" >&2; exit 125; fi
+    done
+    id=$(printf 'fake%04d' "$n" | sha256sum | cut -c1-64)
+    jq -n --arg id "$id" --arg name "/$name" --arg image "$image" --argjson nets "$nets" --argjson labels "$labels" \
+      '{Id: $id, Name: $name, Created: "2026-11-27T21:00:00.000000000Z", Config: {Image: $image, Labels: $labels}, State: {Running: false}, NetworkSettings: {Networks: $nets}}' >"$S/c/$id.json"
+    echo "$id"
+    ;;
+  start | restart)
+    id=${*: -1}
+    f=$S/c/$id.json
+    [ -e "$f" ] || { echo "Error response from daemon: No such container: $id" >&2; exit 1; }
+    # A network with no fixed address gets an address of "the range of Docker": x.y.0.<100 + call number>.
+    jq --argjson n "$n" '.State.Running = true
+      | .NetworkSettings.Networks |= with_entries(.value.IPAddress = (if .value.IPAMConfig then .value.IPAMConfig.IPv4Address else (if .key == "kata-bb-node" then "172.28.0." else "172.29.0." end) + ((100 + $n) | tostring) end))' "$f" >"$f.new"
+    mv "$f.new" "$f"
+    echo "$id"
+    ;;
+  stop)
+    id=${*: -1}
+    f=$S/c/$id.json
+    [ -e "$f" ] || { echo "Error response from daemon: No such container: $id" >&2; exit 1; }
+    jq '.State.Running = false | .NetworkSettings.Networks |= with_entries(.value.IPAddress = "")' "$f" >"$f.new"
+    mv "$f.new" "$f"
+    echo "$id"
+    ;;
+  rm)
+    id=${*: -1}
+    [ -e "$S/c/$id.json" ] || { echo "Error response from daemon: No such container: $id" >&2; exit 1; }
+    unlink "$S/c/$id.json"
+    echo "$id"
+    ;;
+  inspect)
+    if [ "${1:-}" = "--format" ]; then
+      [ "${FAKE_DOCKER_FAIL_INSPECT:-0}" = 1 ] && { echo "Error response from daemon: No such object" >&2; exit 1; }
+      # The fake knows one template: the one of docker-two-nets. It prints, for each container,
+      # each address and each fixed address, as that template does.
+      want='{{range .NetworkSettings.Networks}}{{.IPAddress}} {{with .IPAMConfig}}{{.IPv4Address}}{{end}} {{end}}'
+      [ "$2" = "$want" ] || { echo "fake-docker: inspect --format with a template that the fake does not know: $2" >&2; exit 125; }
+      shift 2
+      rc=0
+      for id in "$@"; do
+        if [ -e "$S/c/$id.json" ]; then
+          jq -r '[.NetworkSettings.Networks[] | (.IPAddress + " " + ((.IPAMConfig // {}).IPv4Address // "") + " ")] | join("")' "$S/c/$id.json"
+        else
+          echo "Error response from daemon: No such object: $id" >&2; rc=1
+        fi
+      done
+      exit "$rc"
+    fi
+    [ -e "$S/c/$1.json" ] || { echo "[]"; echo "Error response from daemon: No such object: $1" >&2; exit 1; }
+    jq -s '.' "$S/c/$1.json"
+    ;;
+  exec)
+    # exec [-i] [--detach] <id> <command...>. With -i the standard input goes to a file.
+    if [ "${1:-}" = "-i" ]; then cat >"$S/stdin-$n"; fi
+    ;;
+  *)
+    echo "fake-docker: the command $cmd is not known to the fake" >&2
+    exit 125
+    ;;
+esac

@@ -1,0 +1,168 @@
+Tests of docker-two-nets on the workstation, 2026-11-27 16:53 EST. No container, no network and no Docker daemon was used.
+fake-docker stands in for docker. It records the arguments of each call.
+
+wrapper-test.sh sh: 41 ok, 0 FAIL
+wrapper-test.sh dash: 41 ok, 0 FAIL
+wrapper-test.sh alpine: 41 ok, 0 FAIL
+  sh is /usr/bin/dash. alpine is the busybox of the image docker:29.1.3-cli (BusyBox v1.37.0, Alpine 3.23.2), taken out of the image archive.
+
+===== wrapper-test.sh alpine, full output
+== shell: <scratch>/alpine-bb/lib/ld-musl-x86_64.so.1 <scratch>/alpine-bb/bin/busybox sh (ok), flock of the program: <state>/bb/flock
+== 1. a call that is not create passes as it is
+ok   ps: exit code 0 and no output
+ok   ps: the fake got the same arguments
+ok   exec -i: exit code 0
+ok   exec -i: the standard input reached the fake
+ok   info: the output of the fake comes back
+ok   no log line for these calls
+ok   no lock file for these calls
+== 2. create: one network argument becomes two, the rest is the same
+ok   exit code 0
+ok   the output is only the container ID (64 hex characters)
+ok   nothing on stderr
+ok   the fake got the expected argument list (41 arguments)
+ok   one log line with both addresses
+== 3. the next address, a container that did not start, and a free address again
+ok   second create (the first did not start): 172.28.2.12
+ok   third create (two run): 172.28.2.13 and 172.29.2.13
+ok   after the first is gone: 172.28.2.11 again
+== 4. an address of the second network that another container has is not taken
+ok   172.29.2.11 is in use, so the worker gets .12 on both networks
+== 5. no address prefix for the second network: Docker gives that address
+ok   second argument is name=kata-bb with no address
+== 6. no second network (P3_API_NET empty): one network with the fixed address
+ok   one network argument
+ok   with the fixed address
+== 7. calls that the program refuses (exit code 64, nothing reaches the fake as create)
+ok   another network than the node network: 64
+ok   the message names both networks
+ok   no --network: 64
+ok   two --network: 64
+ok   --ip in the call: 64
+ok   --network=<name> in one argument: 64
+ok   the range of the pod provider as prefix: 64
+ok   the range of Docker as prefix: 64
+ok   a prefix with two numbers: 64
+ok   the same network two times: 64
+ok   no create call reached the fake
+ok   each refusal has a log line
+== 8. no free address (exit code 69), and a failing docker (its exit code comes back)
+ok   third create with a range of two: 69
+ok   two create calls reached the fake
+ok   the name is in use: the exit code of docker (125) comes back
+ok   and the message of docker comes back
+ok   docker inspect fails two times: 75
+ok   and no create call of the program reached the fake
+== 9. six create calls at the same time get six addresses
+ok   addresses: 172.28.2.11 172.28.2.12 172.28.2.13 172.28.2.14 172.28.2.15 172.28.2.16 
+ok   each call printed one container ID
+== 10. a lock that another process holds
+ok   no lock after the wait limit of 2 s: 75 (waited 2 s)
+ok   after the other process ends: exit code 0
+== result with [<scratch>/alpine-bb/lib/ld-musl-x86_64.so.1 <scratch>/alpine-bb/bin/busybox sh]: 41 ok, 0 FAIL (the state folders stay in <state>)
+
+===== sim-chain-test.sh with the real nico-sim binary (sha256 a127acb9b868...) on 127.0.0.1, full output
+== simulator started, process 200569, state folder <state>
+ok   the simulator answers /healthz with 200
+ok   it listens on the loopback address only
+ok   the health call of the start went through the program to docker (info)
+ok   a call with no token gets 401
+ok   the catalog has the container site 00000000-0000-0000-0000-000000000001
+== first instance
+ok   create: HTTP 201 or 200 (HTTP 200)
+ok   the answer has an instance ID (a5e5e9cf-e38f-45dc-9fda-fdb035861b4e)
+ok   status Ready (join token method, the container runs)
+ok   the reported address is the fixed address on the node network: [["172.28.2.11"]]
+ok   docker got two network arguments
+ok   the node network with the fixed address
+ok   the second network with the fixed address
+ok   the container name is <instance name>-<first 8 characters of the ID>
+ok   the image is the worker image, and the entry command of the simulator follows it
+ok   the entry command ends with the entry point of the image
+ok   the label of the attestation method is joinToken
+ok   the simulator wrote the agent file through docker exec -i
+ok   the order of the calls is create, start, then exec
+== second instance, then a delete
+ok   second instance: address 172.28.2.12
+ok   a later GET of the first instance reports the same address
+ok   delete of the first instance: HTTP 200
+ok   docker got stop and rm --force --volumes for it
+ok   the list has one instance, the second
+ok   third instance takes the free address 172.28.2.11
+== a reboot request (PATCH with triggerReboot)
+ok   reboot: HTTP 200
+ok   docker got restart --time 10
+ok   the address after the restart is the same
+== the log of the program
+2026-11-27T21:46:54Z create name=[kata-cp1-nw-1111-a5e5e9cf] kata-bb-node=172.28.2.11 kata-bb=172.29.2.11 exit=0
+2026-11-27T21:46:54Z create name=[kata-cp1-nw-2222-a8defc1c] kata-bb-node=172.28.2.12 kata-bb=172.29.2.12 exit=0
+2026-11-27T21:46:55Z create name=[kata-cp1-nw-3333-28e8df6a] kata-bb-node=172.28.2.11 kata-bb=172.29.2.11 exit=0
+== calls of the simulator to its Docker program, by command
+      3 create;     32 exec;      1 info;     12 inspect;     14 ps;      1 restart;      1 rm;      3 start;      1 stop;
+== the arguments of the first create call, as docker got them
+create
+--name
+kata-cp1-nw-1111-a5e5e9cf
+--hostname
+kata-cp1-nw-1111
+--privileged
+--security-opt
+seccomp=unconfined
+--security-opt
+apparmor=unconfined
+--tmpfs
+/tmp
+--tmpfs
+/run
+--tmpfs
+/var/lib/etcd:size=4g
+--restart
+always
+--network
+name=kata-bb-node,ip=172.28.2.11
+--network
+name=kata-bb,ip=172.29.2.11
+--env
+KUBECONFIG=/etc/kubernetes/admin.conf
+--env
+KIND_EXPERIMENTAL_CONTAINERD_SNAPSHOTTER=fuse-overlayfs
+--volume
+/var
+--volume
+/lib/modules:/lib/modules:ro
+--entrypoint
+/bin/sh
+--tty
+--label
+nvidia.com/nico-containers.tenant-id=d282929f-49d5-4dec-8d27-21ceb30ade19
+--label
+nvidia.com/nico-containers.instance-type-id=00000000-0000-0000-0000-000000000005
+--label
+nvidia.com/nico-containers.instance-name=kata-cp1-nw-1111
+--label
+nvidia.com/nico-containers.machine-id=machine-a5e5e9cf
+--label
+nvidia.com/nico-containers.ipxe-script=IiMhaXB4ZVxuZWNobyBsb2NhbC1uaWNvLXdvcmtlclxuIg==
+--label
+nvidia.com/nico-containers.subnet-id=00000000-0000-0000-0000-000000000003
+--label
+p3-test=chain
+--label
+nvidia.com/nico-containers.spire-attestation-method=joinToken
+--label
+nvidia.com/nico-containers.ssh-key-group-ids=WyIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDQiXQ==
+--label
+nvidia.com/nico-containers.interfaces=W3sic3VibmV0SWQiOiIwMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDMifV0=
+--label
+nvidia.com/nico-containers.site-id=00000000-0000-0000-0000-000000000001
+--label
+nvidia.com/nico-containers.vpc-id=00000000-0000-0000-0000-000000000002
+--label
+nvidia.com/nico-containers.managed=true
+--label
+nvidia.com/nico-containers.instance-id=a5e5e9cf-e38f-45dc-9fda-fdb035861b4e
+nvke-node-nico:bcc4376f-w1
+-c
+set -e\nmkdir -p /var/lib/nico-containers\nif [ -f /var/lib/nico-containers/next-boot-id ]; then\n  mv /var/lib/nico-containers/next-boot-id /var/lib/nico-containers/boot-id\nfi\nif [ ! -f /var/lib/ni
+ok   the simulator ended (process 200569)
+== result: 28 ok, 0 FAIL (the state folder stays in <state>)

@@ -1,0 +1,33 @@
+{
+  "clusterID": "00000000-0000-0000-0000-000000000000",
+  "name": "nico-workers",
+  "nodeNamePrefix": "nw",
+  "controlPlane": false,
+  "desiredNodeCount": 1,
+  "systemReservedMemory": "512Mi",
+  "infra": {
+    "machineTemplate": {
+  "apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha1",
+  "kind": "NicoMachineTemplate",
+  "metadata": {"name": "kata-cp1-nico-workers-template"},
+  "spec": {
+    "template": {
+      "spec": {
+        "siteID": "00000000-0000-0000-0000-000000000001",
+        "vpcID": "00000000-0000-0000-0000-000000000002",
+        "instanceTypeID": "00000000-0000-0000-0000-000000000005",
+        "cloudInitInjectHostname": true,
+        "ipxeScript": "#!ipxe\necho local-nico-worker\n",
+        "sshKeyGroupIDs": ["00000000-0000-0000-0000-000000000004"],
+        "interfaces": [{"subnetID": "00000000-0000-0000-0000-000000000003"}]
+      }
+    }
+  }
+},
+    "preKubeadmCommands": [
+      "n=0; until [ -S /run/systemd/private ] || [ $n -ge 600 ]; do n=$((n+1)); sleep 0.2; done; echo \"lab wait for systemd: $n steps of 0.2 s\"; [ -S /run/systemd/private ]",
+      "mkdir -p /run/cluster-api",
+      "echo success > /run/cluster-api/bootstrap-success.complete"
+    ]
+  }
+}

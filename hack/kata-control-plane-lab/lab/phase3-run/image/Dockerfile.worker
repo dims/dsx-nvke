@@ -1,0 +1,31 @@
+# The worker image of phase 3: the image that the NICo simulator (container backend) starts for
+# each worker. Form w1 = the lab base image nvke-node:bcc4376f-amd64 with three changes:
+#   1. the NVKE agent binary of the lab build (the file nvke-agent of the build context),
+#   2. the two container images that a node of this lab cannot pull (images/*.tar): pause and
+#      the DNS cache. The OVN images are in the base image as a package file, and a unit of the
+#      base image installs that package at each start,
+#   3. a drop-in of the agent unit that keeps the flag --disable-mlx5-rescan. The base image has
+#      the flag in /etc/default/nvke-agent, and the bootstrap data of NVKE replaces that file.
+#      Without the flag the agent runs a script that can remove PCI devices. In a pod that was a
+#      Kata guest. Here it is a privileged container on the kernel of the machine.
+# Nothing of the pod image is here: no pod entry point, no bootstrap program, no volume devices,
+# no built in datapath check, no kernel config, no health gate.
+# worker-setup.sh does the checks and the two changes that need a program.
+#
+# The Docker of the second machine has the legacy builder only, so no RUN --mount here.
+ARG BASE=nvke-node:bcc4376f-amd64
+FROM ${BASE}
+ARG AGENT_SHA256
+ARG ALLOW_NO_INNER_IMAGES=0
+COPY nvke-agent /usr/local/bin/nvke-agent
+COPY worker-setup.sh /usr/local/lib/p3/worker-setup.sh
+# The tar files stay in this layer. The next step imports them and removes the copies.
+COPY images/ /tmp/p3-images/
+RUN set -eu; \
+    chmod 0755 /usr/local/bin/nvke-agent; \
+    echo "${AGENT_SHA256}  /usr/local/bin/nvke-agent" | sha256sum -c -; \
+    /usr/local/bin/nvke-agent --version 2>&1 | head -1; \
+    ALLOW_NO_INNER_IMAGES="${ALLOW_NO_INNER_IMAGES}" sh /usr/local/lib/p3/worker-setup.sh; \
+    rm /usr/local/lib/p3/worker-setup.sh; \
+    echo "w1" >/usr/local/lib/p3/image-form
+LABEL p3.image-form="w1: the base image with the lab agent, two images and the mlx5 guard" p3.agent-sha256="${AGENT_SHA256}"

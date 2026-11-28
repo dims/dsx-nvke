@@ -1,0 +1,18 @@
+{
+  "apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha1",
+  "kind": "NicoMachineTemplate",
+  "metadata": {"name": "${CLUSTER_NAME}-${POOL_NAME}-template"},
+  "spec": {
+    "template": {
+      "spec": {
+        "siteID": "${NICO_SITE_ID}",
+        "vpcID": "${NICO_VPC_ID}",
+        "instanceTypeID": "${NICO_INSTANCE_TYPE_ID}",
+        "cloudInitInjectHostname": true,
+        "ipxeScript": "#!ipxe\necho local-nico-worker\n",
+        "sshKeyGroupIDs": ["${NICO_SSH_KEY_GROUP_ID}"],
+        "interfaces": [{"subnetID": "${NICO_SUBNET_ID}"}]
+      }
+    }
+  }
+}

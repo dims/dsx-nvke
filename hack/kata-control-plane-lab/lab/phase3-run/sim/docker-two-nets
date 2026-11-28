@@ -1,0 +1,208 @@
+#!/bin/sh
+# docker-two-nets: the Docker command of the NICo simulator (nico-sim) for phase 3, step B.
+#
+# The simulator calls one program for each Docker step. The setting NICO_CONTAINERS_DOCKER_BINARY
+# names it (controller/nico-sim/internal/config/config.go:216, internal/container/docker.go:289-303).
+# This program passes each call to the real docker. It changes one call: "create".
+#
+# The simulator makes a worker with one network argument, "--network <node network>"
+# (internal/container/service.go:265). This program replaces that argument with two:
+#   --network name=<node network>,ip=<fixed node address>
+#   --network name=<API network>[,ip=<fixed address with the same last number>]
+# So the container has both networks before it starts, and the node address is fixed and is
+# outside the range of the pod provider.
+#
+# It also fixes the order of the two networks inside the container (since 2026-11-27):
+#   - Each network argument gets "driver-opt=com.docker.network.endpoint.ifname=<name>", so the
+#     node network is eth0 and the second network is eth1, each time. Without it Docker 29.1.3
+#     connects the two networks in a random order at each start of the container, also at a
+#     restart (4 throwaway containers, one changed its order at the restart).
+#   - It adds "--add-host <host name>:<node address>". Docker writes that line into /etc/hosts
+#     before the lines of the networks. The entry program of the kind node image takes the first
+#     address of the host name (getent ahostsv4), keeps it in /kind/old-ipv4, and at a restart
+#     replaces the old address by the new one in the kubeadm and kubelet files. With this line
+#     the first address is the node address each time. The simulator reports the address on the network of
+# NICO_CONTAINERS_NODE_NETWORK (internal/container/docker.go:100-101), which is the fixed one.
+#
+# Rules of this program:
+#   - It prints nothing on a good call. The simulator reads the output of "create" as the
+#     container ID (stdout and stderr together).
+#   - It refuses a "create" call that does not have exactly one "--network <node network>".
+#   - One "create" at a time (a lock), so two workers cannot get the same address.
+#   - It keeps no state. The addresses in use come from "docker inspect" of each container.
+#
+# Settings (environment of the simulator container):
+#   P3_REAL_DOCKER      the real docker program                     default: docker
+#   P3_NODE_NET         the node network, as NICO_CONTAINERS_NODE_NETWORK   default: kata-bb-node
+#   P3_NODE_IP_PREFIX   the first three numbers of a node address   default: 172.28.2
+#   P3_API_NET          the second network. Empty: no second network        default: kata-bb
+#   P3_API_IP_PREFIX    the first three numbers of the address on the second network.
+#                       Empty: Docker gives that address            default: empty
+#   P3_IP_FIRST, P3_IP_LAST   the range of the last number          default: 11 and 250
+#   P3_NODE_IFNAME      the interface name of the node network in the container   default: eth0
+#   P3_API_IFNAME       the interface name of the second network                  default: eth1
+#                       Both empty: Docker chooses the names (the form before 2026-11-27)
+#   P3_HOSTS_ENTRY      1: add the hosts line of the host name with the node address. 0: no line
+#                                                                    default: 1
+#   P3_FORBIDDEN_PREFIXES     prefixes that P3_NODE_IP_PREFIX must not be: the range that Docker
+#                       gives out and the range of the pod provider default: "172.28.0 172.28.1"
+#   P3_LOG              one line for each "create"                  default: /state/docker-two-nets.log
+#   P3_LOCK             the lock file                               default: /state/docker-two-nets.lock
+#   P3_LOCK_WAIT        seconds to wait for the lock                default: 60
+#
+# Exit codes of this program itself: 64 a call or a setting that it does not accept,
+# 69 no free address, 75 no lock or no list of the addresses in use. Each other code is the
+# code of the real docker.
+set -eu
+
+REAL=${P3_REAL_DOCKER:-docker}
+
+# Each call that is not "create" goes to the real docker as it is, with stdin.
+if [ "${1:-}" != "create" ]; then
+  exec "$REAL" "$@"
+fi
+
+NODE_NET=${P3_NODE_NET:-kata-bb-node}
+NODE_PREFIX=${P3_NODE_IP_PREFIX:-172.28.2}
+API_NET=${P3_API_NET-kata-bb}
+API_PREFIX=${P3_API_IP_PREFIX:-}
+NODE_IF=${P3_NODE_IFNAME-eth0}
+API_IF=${P3_API_IFNAME-eth1}
+HOSTS_ENTRY=${P3_HOSTS_ENTRY:-1}
+IFOPT=driver-opt=com.docker.network.endpoint.ifname
+FIRST=${P3_IP_FIRST:-11}
+LAST=${P3_IP_LAST:-250}
+FORBIDDEN=${P3_FORBIDDEN_PREFIXES-172.28.0 172.28.1}
+LOG=${P3_LOG:-/state/docker-two-nets.log}
+LOCK=${P3_LOCK:-/state/docker-two-nets.lock}
+LOCK_WAIT=${P3_LOCK_WAIT:-60}
+
+log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >>"$LOG" 2>/dev/null || true; }
+die() { code=$1; shift; log "REFUSED ($code): $*"; echo "docker-two-nets: $*" >&2; exit "$code"; }
+
+# --- the settings ---------------------------------------------------------------------------
+case "$NODE_PREFIX" in
+  *[!0-9.]* | *.*.*.* | .* | *. | *..*) die 64 "P3_NODE_IP_PREFIX [$NODE_PREFIX] is not three numbers" ;;
+  *.*.*) ;;
+  *) die 64 "P3_NODE_IP_PREFIX [$NODE_PREFIX] is not three numbers" ;;
+esac
+if [ -n "$API_PREFIX" ]; then
+  [ -n "$API_NET" ] || die 64 "P3_API_IP_PREFIX is set and P3_API_NET is empty"
+  case "$API_PREFIX" in
+    *[!0-9.]* | *.*.*.* | .* | *. | *..*) die 64 "P3_API_IP_PREFIX [$API_PREFIX] is not three numbers" ;;
+    *.*.*) ;;
+    *) die 64 "P3_API_IP_PREFIX [$API_PREFIX] is not three numbers" ;;
+  esac
+fi
+case "$FIRST$LAST" in *[!0-9]* | "") die 64 "P3_IP_FIRST [$FIRST] or P3_IP_LAST [$LAST] is not a number" ;; esac
+if [ "$FIRST" -lt 2 ] || [ "$LAST" -gt 254 ] || [ "$FIRST" -gt "$LAST" ]; then
+  die 64 "the range $FIRST to $LAST is not inside 2 to 254"
+fi
+for p in $FORBIDDEN; do
+  [ "$NODE_PREFIX" != "$p" ] || die 64 "P3_NODE_IP_PREFIX [$NODE_PREFIX] is a range that Docker or the pod provider gives out"
+done
+[ "$NODE_NET" != "$API_NET" ] || die 64 "P3_NODE_NET and P3_API_NET are the same network [$NODE_NET]"
+for v in "$NODE_IF" "$API_IF"; do
+  case "$v" in
+    "") ;;
+    *[!a-z0-9]* | [0-9]*) die 64 "the interface name [$v] is not a small letter with small letters and digits after it" ;;
+  esac
+  [ "${#v}" -le 15 ] || die 64 "the interface name [$v] has more than 15 characters"
+done
+if [ -n "$API_NET" ]; then
+  if [ -n "$NODE_IF" ] && [ "$NODE_IF" = "$API_IF" ]; then die 64 "P3_NODE_IFNAME and P3_API_IFNAME are the same name [$NODE_IF]"; fi
+  if { [ -n "$NODE_IF" ] && [ -z "$API_IF" ]; } || { [ -z "$NODE_IF" ] && [ -n "$API_IF" ]; }; then
+    die 64 "one of P3_NODE_IFNAME [$NODE_IF] and P3_API_IFNAME [$API_IF] is empty. Set both or none"
+  fi
+fi
+case "$HOSTS_ENTRY" in 0 | 1) ;; *) die 64 "P3_HOSTS_ENTRY [$HOSTS_ENTRY] is not 0 or 1" ;; esac
+
+# --- the call: exactly one "--network <node network>", and no other network or address option --
+name=""
+host=""
+count=0
+prev=""
+for a in "$@"; do
+  case "$a" in
+    --network=* | --net | --net=* | --ip | --ip=* | --ip6 | --ip6=*)
+      die 64 "the create call has the option [$a]. This program knows only \"--network <name>\"" ;;
+  esac
+  if [ "$prev" = "--network" ]; then
+    count=$((count + 1))
+    [ "$a" = "$NODE_NET" ] || die 64 "the create call asks for the network [$a], not [$NODE_NET]. NICO_CONTAINERS_NODE_NETWORK and P3_NODE_NET must be the same"
+  fi
+  [ "$prev" != "--name" ] || name=$a
+  [ "$prev" != "--hostname" ] || host=$a
+  prev=$a
+done
+[ "$count" = 1 ] || die 64 "the create call has $count \"--network\" options, not 1"
+
+# --- one create at a time ---------------------------------------------------------------------
+command -v flock >/dev/null 2>&1 || die 64 "no flock program in this container"
+{ : >>"$LOCK"; } 2>/dev/null || die 75 "cannot write the lock file $LOCK"
+exec 9>>"$LOCK"
+i=0
+until flock -n 9; do
+  i=$((i + 1))
+  [ "$i" -le "$LOCK_WAIT" ] || die 75 "no lock on $LOCK after $LOCK_WAIT s"
+  sleep 1
+done
+
+# --- the addresses in use: each address of each container, running or not ---------------------
+# For a container that did not start yet, the fixed address is in IPAMConfig only.
+FMT='{{range .NetworkSettings.Networks}}{{.IPAddress}} {{with .IPAMConfig}}{{.IPv4Address}}{{end}} {{end}}'
+used_addresses() {
+  ids=$("$REAL" ps -aq 9>&-) || return 1
+  [ -n "$ids" ] || return 0
+  # shellcheck disable=SC2086  # one argument for each container ID
+  "$REAL" inspect --format "$FMT" $ids 9>&-
+}
+# A container can go away between the two calls. Then "inspect" fails. Try one more time.
+if ! used=$(used_addresses 2>/dev/null); then
+  sleep 1
+  used=$(used_addresses 2>/dev/null) || die 75 "cannot list the addresses in use (docker ps or docker inspect failed two times)"
+fi
+used=$(printf '%s\n' "$used" | tr ' ' '\n' | sed '/^$/d')
+in_use() { printf '%s\n' "$used" | grep -q -x -F -e "$1"; }
+
+n=$FIRST
+node_ip=""
+api_ip=""
+while [ "$n" -le "$LAST" ]; do
+  if ! in_use "$NODE_PREFIX.$n" && { [ -z "$API_PREFIX" ] || ! in_use "$API_PREFIX.$n"; }; then
+    node_ip=$NODE_PREFIX.$n
+    [ -z "$API_PREFIX" ] || api_ip=$API_PREFIX.$n
+    break
+  fi
+  n=$((n + 1))
+done
+[ -n "$node_ip" ] || die 69 "no free address from $NODE_PREFIX.$FIRST to $NODE_PREFIX.$LAST"
+
+# --- the new argument list: the same arguments in the same order, with the one change ---------
+total=$#
+i=0
+hosts_entry=none
+while [ "$i" -lt "$total" ]; do
+  a=$1
+  shift
+  i=$((i + 1))
+  if [ "$a" = "--network" ]; then
+    shift
+    i=$((i + 1))
+    if [ "$HOSTS_ENTRY" = 1 ] && [ -n "$host" ]; then
+      set -- "$@" --add-host "$host:$node_ip"
+      hosts_entry=$host
+    fi
+    set -- "$@" --network "name=$NODE_NET,ip=$node_ip${NODE_IF:+,$IFOPT=$NODE_IF}"
+    if [ -n "$API_NET" ]; then
+      set -- "$@" --network "name=$API_NET${api_ip:+,ip=$api_ip}${API_IF:+,$IFOPT=$API_IF}"
+    fi
+  else
+    set -- "$@" "$a"
+  fi
+done
+
+rc=0
+"$REAL" "$@" 9>&- || rc=$?
+log "create name=[$name] $NODE_NET=$node_ip ${API_NET:-no-second-network}=${api_ip:-by-docker} ifnames=${NODE_IF:-by-docker},${API_IF:-by-docker} hosts-entry=$hosts_entry exit=$rc"
+exit "$rc"
