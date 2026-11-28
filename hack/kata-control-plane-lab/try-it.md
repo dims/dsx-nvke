@@ -5,7 +5,7 @@ State of 2026-11-28. The guide uses two public branches:
 - `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `8bc32175`
 - `integration/control-plane-kata-pods` of `https://github.com/dims/kata-containers`, at `96a8d905b`
 
-**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Scenarios 1 to 5 and 7 passed too. Scenario 6 did not pass at its first try, and a second try is under way. Each other scenario ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
+**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Scenarios 1 to 5, 7 and 10 passed too. Scenario 6 did not pass at its first try. The cluster was made again for its second try, which is under way. Each other scenario ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
 
 ## What the feature is
 
@@ -20,7 +20,7 @@ State of 2026-11-28. The guide uses two public branches:
 - One Linux machine on amd64 or arm64 with `/dev/kvm`. In a virtual machine, nested virtualization must be on. Each step is tested on amd64. On arm64 the first run is in work, and "On arm64" has its state.
 - 16 CPUs, 48 GB of memory and 100 GB of free disk. Our lab machine was larger, and a smaller one never ran.
 - `sudo` rights, for `modprobe`, `sysctl` and `losetup`.
-- Docker 28 or newer with `buildx`. A container must reach the internet.
+- Docker 28 or newer with `buildx`. A container must reach the internet. The user of the run must be able to call `docker` with no `sudo`.
 - `git`, `make`, a C compiler, `python3`, `curl`, `jq`, `tar` with `zstd`, Go 1.27, `kind`, `kubectl`, `helm`, `clusterctl`, and for the kernel build `yq`, `flex`, `bison`, `patch` and the headers of `libelf`.
 - The NVKE tree pins the versions that it is tested with: `kind`, `kubectl`, `helm` and Cluster API (for `clusterctl`) in `make/tool-versions.mk`, and Go in `go.work`. The first run used these versions.
 - No account and no secret. Each input is public.
@@ -33,7 +33,7 @@ State of 2026-11-28. A first run is in work, on one arm64 machine with `/dev/kvm
 - The hypervisor differs. Kata Containers 4.4.0 has Cloud Hypervisor with its Rust runtime for amd64 only. On arm64 `up.sh` puts the runtime class `kata-podvm` on QEMU with the same Rust runtime. The guest kernel, the guest image and the name of the runtime class are the same.
 - On arm64 `up.sh` also gives each kind node a larger `/dev/shm`. QEMU keeps the memory of a guest there, and a container has 64 MB of it.
 - Each mark, each time and each number of this guide is from amd64.
-- Steps that passed on arm64: 1, 2 and 3. The guest kernel of step 3 has the same file name there.
+- Steps that passed on arm64: 1 to 8, each as it is written here, on 2026-11-28. The guest kernel of step 3 has the same file name there. Step 4 took 11 minutes, and the base image of step 5 has 1.1 GB. The pod of step 8 runs on QEMU and prints the same kernel version.
 
 ## The marks
 
@@ -230,7 +230,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" "$API
 
 ## Part 2, scenarios
 
-Run them in this order on one cluster. Each one names its pass rule.
+Run them on one cluster, in this order: 1, 2, 3, 4, 5, 6, 8, 9, 7, 10. Scenario 7 comes last before the delete, because NVKE avoids a kind worker that was full for 3 hours after it, and a later rollout of the control plane can wait that long. Each one names its pass rule.
 
 Three helpers for the scenarios:
 
@@ -376,47 +376,6 @@ nvkectl get clusters podvm-example -o yaml | grep etcdEncrypted
 - **If not.** If the status stays `Updating` for more than 10 minutes, search the log of the controller: `kh -n nvke-controller logs deployment/nvke-controller --since=5m | grep 'Activity error'` shows the reason. Then run the patch of scenario 5 with the tag `podvm-node:local`. A control plane node must still join after encryption.
 - **Time.** The lab measured 5 min 32 s.
 
-### Scenario 7, a full failure domain
-
-**Ran in the first run of 2026-11-28.** In the lab a worker that was a pod took the place. Here a plain pod does. The run rolled to the tag `podvm-node:local`, because the control plane was at `podvm-node:local-b` then: take the tag that the control plane does not have.
-
-Each kind worker has two volume places, and a control plane node holds one. Check with `kh -n podvm-clusters get pods -o wide` that `podvm-worker` runs one control plane pod. Take its second place, then roll the control plane:
-
-```bash
-kh -n podvm-clusters apply -f - <<'EOF'
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata: {name: blocker-var}
-spec: {storageClassName: podvm-block, volumeMode: Block, accessModes: [ReadWriteOnce], resources: {requests: {storage: 20Gi}}}
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata: {name: blocker-etcd}
-spec: {storageClassName: podvm-block, volumeMode: Block, accessModes: [ReadWriteOnce], resources: {requests: {storage: 8Gi}}}
----
-apiVersion: v1
-kind: Pod
-metadata: {name: blocker}
-spec:
-  nodeSelector: {kubernetes.io/hostname: podvm-worker}
-  containers:
-    - name: pause
-      image: registry.k8s.io/pause:3.10
-      volumeDevices: [{name: var, devicePath: /dev/blocker-var}, {name: etcd, devicePath: /dev/blocker-etcd}]
-  volumes:
-    - {name: var, persistentVolumeClaim: {claimName: blocker-var}}
-    - {name: etcd, persistentVolumeClaim: {claimName: blocker-etcd}}
-EOF
-template podvm-node:local-b | nvkectl patch cluster podvm-example --patch-file -
-kh -n nvke-system get podvmmachines --watch
-```
-
-- **Pass.** One machine shows the reason `FailureDomainUnavailable`, and its pod stays Pending. About 16 minutes later NVKE deletes that node and makes a new one on another kind worker. The rollout then ends with three new nodes.
-- **It can happen two times.** The new node goes to a kind worker that already runs a control plane node, and that worker is full then. In the first run the machine for the next old node on that worker waited 16 minutes too.
-- **What stays.** At the end one kind worker runs two control plane nodes and one runs none. The next rollout starts with a machine for the full worker and waits 16 minutes one more time. After that rollout each kind worker runs one node again.
-- **After it.** `kh -n podvm-clusters delete pod/blocker pvc/blocker-var pvc/blocker-etcd`.
-- **Time.** In the first run 42 minutes, with two waits of 16 minutes. The loop of scenario 5 on the API had 2419 of 2419 calls with an answer.
-
 ### Scenario 8, upgrade the Kubernetes version
 
 **Lab.** The lab went from 1.35.5 to 1.36.4 with a node image that is not public. A node image for 1.37.0 from the public scripts is **New**.
@@ -454,9 +413,54 @@ kc label node <name of that worker> nvke.nvidia.com/reboot=try-1
 - A lower count of a pool removes no node. Only a node delete does.
 - No product page has the label command. The label is the reboot request of NVKE.
 
+### Scenario 7, a full failure domain
+
+**Ran in the first run of 2026-11-28**, at that time before scenario 8 and with a roll to the tag `podvm-node:local`. In the lab a worker that was a pod took the place. Here a plain pod does.
+
+Run this scenario last before the delete. After it NVKE avoids each kind worker that was full for 3 hours, and a later rollout of the control plane can wait that long. In the first run the next rollout did not go on.
+
+Each kind worker has two volume places, and a control plane node holds one. Check with `kh -n podvm-clusters get pods -o wide` that `podvm-worker` runs one control plane pod. Give the node image that the control plane runs a second name, take the second place of `podvm-worker`, then roll the control plane to the second name:
+
+```bash
+NOW=$(kh -n podvm-clusters get pods -o jsonpath='{.items[0].spec.containers[0].image}' | sed 's#.*/##')
+docker tag $NOW $NOW-x && load $NOW-x
+kh -n podvm-clusters apply -f - <<'EOF'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: blocker-var}
+spec: {storageClassName: podvm-block, volumeMode: Block, accessModes: [ReadWriteOnce], resources: {requests: {storage: 20Gi}}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: blocker-etcd}
+spec: {storageClassName: podvm-block, volumeMode: Block, accessModes: [ReadWriteOnce], resources: {requests: {storage: 8Gi}}}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: blocker}
+spec:
+  nodeSelector: {kubernetes.io/hostname: podvm-worker}
+  containers:
+    - name: pause
+      image: registry.k8s.io/pause:3.10
+      volumeDevices: [{name: var, devicePath: /dev/blocker-var}, {name: etcd, devicePath: /dev/blocker-etcd}]
+  volumes:
+    - {name: var, persistentVolumeClaim: {claimName: blocker-var}}
+    - {name: etcd, persistentVolumeClaim: {claimName: blocker-etcd}}
+EOF
+template $NOW-x | nvkectl patch cluster podvm-example --patch-file -
+kh -n nvke-system get podvmmachines --watch
+```
+
+- **Pass.** One machine shows the reason `FailureDomainUnavailable`, and its pod stays Pending. About 16 minutes later NVKE deletes that node and makes a new one on another kind worker. The rollout then ends with three new nodes.
+- **It can happen two times.** The new node goes to a kind worker that already runs a control plane node, and that worker is full then. In the first run the machine for the next old node on that worker waited 16 minutes too.
+- **What stays.** At the end one kind worker runs two control plane nodes and one runs none. NVKE avoids the two workers that were full for 3 hours. In the first run that left only the worker with two control plane nodes for a new node, which is full, so the next rollout did not go on. NVKE shows nothing of this, and the log of the controller is silent about it.
+- **After it.** `kh -n podvm-clusters delete pod/blocker pvc/blocker-var pvc/blocker-etcd`.
+- **Time.** In the first run 42 minutes, with two waits of 16 minutes. The loop of scenario 5 on the API had 2419 of 2419 calls with an answer.
+
 ### Scenario 10, delete the cluster
 
-**Lab** for the delete. **New** for the volumes that the provisioner cleans.
+**Ran in the first run of 2026-11-28.**
 
 ```bash
 nvkectl delete cluster podvm-example
@@ -467,8 +471,8 @@ kh get pv
 docker ps --format '{{.Names}}'
 ```
 
-- **Pass.** No cluster, no pod, no claim, no Service and no provider object. Twelve volumes with the status `Available` again, with no step by hand. Only the four kind nodes in `docker ps`.
-- **Time.** The lab measured 46 to 80 s until the cluster was gone.
+- **Pass.** No cluster, no pod, no claim, no Service and no provider object. Twelve volumes with the status `Available` again, with no step by hand. In `docker ps` only the four kind nodes, and the build container of `buildx` if step 6 made one.
+- **Time.** In the first run the cluster was gone from `nvkectl` after 100 s, and the twelve volumes were `Available` after 121 s.
 
 ## Not possible from public interfaces yet
 
