@@ -133,9 +133,16 @@ type PodVMClusterSpec struct {
 	// value of this label. When no node carries the label, the provider
 	// publishes one failure domain for each host node, from the label
 	// kubernetes.io/hostname.
+	//
+	// It cannot change. The machines that exist name failure domains that
+	// the cluster reported for this label. With another label the cluster
+	// would report other failure domains, and the next pod of a machine would
+	// ask for its old failure domain under the new label. A machine that was
+	// placed by a value of the old label would then find no host node.
 	// +optional
 	// +kubebuilder:default="topology.kubernetes.io/zone"
 	// +kubebuilder:validation:MaxLength=317
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="failureDomainLabelKey is immutable"
 	FailureDomainLabelKey string `json:"failureDomainLabelKey,omitempty"`
 
 	// ControlPlaneService asks the provider to make the Service of the

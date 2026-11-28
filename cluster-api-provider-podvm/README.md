@@ -111,6 +111,13 @@ the volumes of its old pod. The API server refuses a change of these fields:
 | `controlPlaneService` | See [The control plane Service](#the-control-plane-service) |
 | `runtimeClassName` | The next pod of each machine would run in another runtime. What the RuntimeClass names can change in the host cluster, for example with a new version of Kata |
 | `networkAttachment` | The next pod of each machine would be on another network than the pods that still run, with an address of the same block |
+| `failureDomainLabelKey` | The cluster would report other failure domains than the ones that the machines that exist name. The next pod of a machine that was placed by a value of the old label would find no host node |
+
+These are all fields of the spec: a `PodVMCluster` does not change after it
+exists. The labels of the host nodes can change, and the cluster then reports
+the failure domains of the new values. A machine that exists keeps the failure
+domain that it names, so a host node must keep a value that such a machine
+names.
 
 ### The control plane Service
 
