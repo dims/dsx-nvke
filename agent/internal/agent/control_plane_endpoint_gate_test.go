@@ -18,6 +18,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	pb "github.com/dsx-ai-factory/nvke/agent/pkg/agent/proto"
 	nvkeutils "github.com/dsx-ai-factory/nvke/agent/pkg/utils"
@@ -35,9 +37,10 @@ const (
 
 	// The owner of a closed gate, as gateState reports it. The first two are also
 	// the park directories.
-	callerGate = defaultStaticPodBackupDir
-	defragGate = defaultEtcdDefragParkDir
-	byHandGate = "no owner" // a gate file that the agent did not write
+	callerGate  = defaultStaticPodBackupDir
+	defragGate  = defaultEtcdDefragParkDir
+	upgradeGate = kubeadmUpgradeApplyGateOwner
+	byHandGate  = "no owner" // a gate file that the agent did not write
 
 	// The event of a closed socket. The owner of the gate at that moment follows.
 	closedBackendPeer = "close " + testBackendAddress + ":6443 -> 203.0.113.7:41000 gate="
@@ -65,7 +68,8 @@ var (
 // endpointGateNode adds to controlPlaneNodeFake what a node behind a load
 // balancer has: a backend interface, and sockets that are told apart by the
 // local address they arrived on. It records the owner of the gate when a socket
-// is closed and when etcd stops, because the property under test is an order.
+// is closed, when etcd stops and when kubeadm runs, because the property under
+// test is an order.
 type endpointGateNode struct {
 	*controlPlaneNodeFake
 	gatePath string
@@ -78,6 +82,9 @@ type endpointGateNode struct {
 	listings map[string]int
 	closeErr error // fails `ss -K`
 	events   []string
+
+	kubeadmErr  map[string]error // fails `kubeadm upgrade <subcommand>`
+	duringApply func()           // runs while `kubeadm upgrade apply` runs
 }
 
 // gateState is the owner of the closed gate, or nothing when the gate is open.
@@ -108,6 +115,13 @@ func (n *endpointGateNode) Run(name string, args []string, opts *nvkeutils.Comma
 		return nil, n.closeErr
 	case name == "crictl" && len(args) > 0 && args[0] == "stop":
 		n.events = append(n.events, "stop-etcd gate="+n.gateState())
+	case name == "kubeadm" && len(args) > 1 && args[0] == kubeadmUpgradeCommand:
+		// kubeadm upgrade plan, and kubeadm upgrade apply <version> <flags>
+		n.events = append(n.events, "kubeadm "+args[1]+" gate="+n.gateState())
+		if args[1] == kubeadmApplyCommand && n.duringApply != nil {
+			n.duringApply()
+		}
+		return []byte(args[1] + " output"), n.kubeadmErr[args[1]]
 	}
 	return n.controlPlaneNodeFake.Run(name, args, opts)
 }
@@ -531,6 +545,169 @@ func etcdNeverHealthyAfterRestart(_ *testing.T, s *NodeAgentServer, _ *endpointG
 	}
 }
 
+// KubeadmUpgradeApply restarts etcd and kube-apiserver of the node inside one
+// command. It closes the gate for that command only and opens it itself, so a
+// gate it closes names the RPC and not a park directory.
+func TestKubeadmUpgradeApplyClosesTheControlPlaneEndpointGate(t *testing.T) {
+	const (
+		plan  = "kubeadm plan gate="
+		apply = "kubeadm apply gate="
+	)
+	kubeadmFails := func(subcommand string) gateSetup {
+		return func(_ *testing.T, _ *NodeAgentServer, n *endpointGateNode) {
+			n.kubeadmErr = map[string]error{subcommand: errors.New(subcommand + " command failed")}
+		}
+	}
+	etcdMembers := func(change func(*fakeEtcdMemberClient)) gateSetup {
+		return func(_ *testing.T, s *NodeAgentServer, _ *endpointGateNode) {
+			change(s.etcdClient.(*fakeEtcdMemberClient))
+		}
+	}
+	// The local member is the second of the three.
+	oneControlPlaneNode := etcdMembers(func(c *fakeEtcdMemberClient) { c.members = c.members[1:2] })
+	// The apply runs under staticPodMutationMu only when it runs behind the gate.
+	applyHoldsTheLock := func(want bool) gateSetup {
+		return func(t *testing.T, s *NodeAgentServer, n *endpointGateNode) {
+			n.duringApply = func() {
+				held := !s.staticPodMutationMu.TryLock()
+				if !held {
+					s.staticPodMutationMu.Unlock()
+				}
+				assert.Equal(t, want, held, "staticPodMutationMu is held while kubeadm upgrade apply runs")
+			}
+		}
+	}
+
+	tests := []struct {
+		name   string
+		noGate bool
+		setup  []gateSetup
+
+		wantErr        []string // the call fails with codes.Internal when it is set
+		wantEvents     []string
+		wantGate       string
+		wantNoGateWork bool // the backend interface and the etcd members are never read
+	}{
+		{
+			name:       "the gate is open for the plan, closed with the backend sockets for the apply, and open when kubeadm returns",
+			setup:      []gateSetup{peersOn(testBackendAddress, testBackendPeer, ""), applyHoldsTheLock(true)},
+			wantEvents: []string{plan, closedBackendPeer + upgradeGate, apply + upgradeGate},
+		},
+		{
+			name:       "an apply that fails opens the gate again",
+			setup:      []gateSetup{kubeadmFails(kubeadmApplyCommand)},
+			wantErr:    []string{"kubeadm upgrade apply v1.34.2 failed", "apply command failed"},
+			wantEvents: []string{plan, apply + upgradeGate},
+		},
+		{
+			name:           "a plan that fails closes no gate",
+			setup:          []gateSetup{kubeadmFails(kubeadmPlanCommand)},
+			wantErr:        []string{"kubeadm upgrade plan failed", "plan command failed"},
+			wantEvents:     []string{plan},
+			wantNoGateWork: true,
+		},
+		{
+			name:  "a load balancer that still sends connections stops the call before the apply and the gate opens again",
+			setup: []gateSetup{peersOn(testBackendAddress, "", testBackendPeer)},
+			wantErr: []string{
+				"kubeadm upgrade apply v1.34.2 failed: not started",
+				"control plane endpoint backend socket quiet window failed on " + testBackendAddress,
+			},
+			wantEvents: []string{plan},
+		},
+		{
+			name:       "a failed gate write stops the call before the apply with the gate open",
+			setup:      []gateSetup{gateWriteFails},
+			wantErr:    []string{"not started", "close control plane endpoint gate", "disk full"},
+			wantEvents: []string{plan},
+		},
+		{
+			name:       "a cluster with one control plane node keeps the gate open, because kubeadm reaches the cluster through the load balancer",
+			setup:      []gateSetup{oneControlPlaneNode, applyHoldsTheLock(false)},
+			wantEvents: []string{plan, apply},
+		},
+		{
+			name:       "etcd members that cannot be listed keep the gate open",
+			setup:      []gateSetup{etcdMembers(func(c *fakeEtcdMemberClient) { c.listErr = errors.New("context deadline exceeded") })},
+			wantEvents: []string{plan, apply},
+		},
+		{
+			name:       "a gate that a caller closed stays closed and stays the caller's, and no socket is closed again",
+			setup:      []gateSetup{gateClosedBy(callerGate), peersOn(testBackendAddress, testBackendPeer)},
+			wantEvents: []string{plan + callerGate, apply + callerGate},
+			wantGate:   callerGate,
+		},
+		{
+			name:       "a second call takes over a gate that the first call left closed, and opens it",
+			setup:      []gateSetup{gateClosedBy(upgradeGate), peersOn(testBackendAddress, testBackendPeer, "")},
+			wantEvents: []string{plan + upgradeGate, closedBackendPeer + upgradeGate, apply + upgradeGate},
+		},
+		{
+			// A directory is not a gate file, and gateState reads it as an open gate.
+			name: "a gate that cannot be opened fails the call after the apply",
+			setup: []gateSetup{func(t *testing.T, _ *NodeAgentServer, n *endpointGateNode) {
+				n.duringApply = func() {
+					assert.NoError(t, os.Remove(n.gatePath))
+					assert.NoError(t, os.MkdirAll(n.gatePath, 0o755))
+				}
+			}},
+			wantErr:    []string{"this node did not return to the control plane endpoint", "open control plane endpoint gate"},
+			wantEvents: []string{plan, apply + upgradeGate},
+		},
+		{
+			name:           "with no gate flag the call is the plan and the apply, and a file at the gate path is left alone",
+			noGate:         true,
+			setup:          []gateSetup{gateClosedBy(callerGate), applyHoldsTheLock(false)},
+			wantEvents:     []string{plan + callerGate, apply + callerGate},
+			wantGate:       callerGate,
+			wantNoGateWork: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s, node := endpointGateTestServer(t, false, !tc.noGate, tc.setup...)
+			etcd := &memberListCounter{etcdMemberClient: s.etcdClient}
+			s.etcdClient = etcd
+
+			response, err := s.KubeadmUpgradeApply(context.Background(), &pb.KubeadmUpgradeApplyRequest{TargetVersion: "1.34.2"})
+
+			if len(tc.wantErr) == 0 {
+				require.NoError(t, err)
+				assert.Equal(t, pb.KubeadmUpgradeApplyResponse_OUTCOME_APPLIED, response.GetOutcome())
+				assert.Equal(t, "plan output", response.GetPlanOutput())
+				assert.Equal(t, "apply output", response.GetApplyOutput())
+			} else {
+				assert.Nil(t, response)
+				assert.Equal(t, codes.Internal, status.Code(err))
+			}
+			for _, want := range tc.wantErr {
+				require.ErrorContains(t, err, want)
+			}
+			assert.Equal(t, tc.wantEvents, node.events)
+			assert.Equal(t, tc.wantGate, node.gateState())
+			if tc.wantNoGateWork {
+				assert.Zero(t, node.backendQueries, "the backend interface is never read")
+				assert.Zero(t, etcd.calls, "the etcd members are never listed")
+			}
+			if assert.True(t, s.staticPodMutationMu.TryLock(), "staticPodMutationMu is free when the call returns") {
+				s.staticPodMutationMu.Unlock()
+			}
+		})
+	}
+}
+
+// memberListCounter counts the calls that list the etcd members.
+type memberListCounter struct {
+	etcdMemberClient
+	calls int
+}
+
+func (c *memberListCounter) MemberList(ctx context.Context, opts ...clientv3.OpOption) (*clientv3.MemberListResponse, error) {
+	c.calls++
+	return c.etcdMemberClient.MemberList(ctx, opts...)
+}
+
 // The repair of stale state at startup. It opens a gate under the rule that
 // decides which parked manifests it puts back: only what the defragmentation
 // owes. It closes no socket, so no case expects an event.
@@ -548,6 +725,7 @@ func TestReconcileInterruptedStaticPodParksOpensAStaleControlPlaneEndpointGate(t
 			kubeVip: true,
 			setup:   []gateSetup{parkedIn(defragGate, defaultKubeAPIServerManifestName, defaultKubeVipManifestName), gateClosedBy(defragGate)},
 		},
+		{name: "a gate closed by an interrupted kubeadm upgrade apply is opened", setup: []gateSetup{gateClosedBy(upgradeGate)}},
 		{name: "a gate closed by a graceful shutdown stays closed", setup: []gateSetup{gateClosedBy(callerGate)}, wantGate: callerGate},
 		{
 			name: "a gate handed to the caller by a defragmentation that gave up on the member stays closed",
@@ -588,6 +766,13 @@ func TestCloseControlPlaneEndpointGateOwnership(t *testing.T) {
 		{name: "the defragmentation closes its own gate again", existing: defragGate, parkDir: defragGate, wantClosed: true, wantGate: defragGate},
 		{name: "the defragmentation leaves a gate that a caller closed", existing: callerGate, parkDir: defragGate, wantGate: callerGate},
 		{name: "the defragmentation leaves a gate that an operator closed by hand", existing: byHandGate, parkDir: defragGate, wantGate: byHandGate},
+		{name: "the upgrade closes an open gate", parkDir: upgradeGate, wantClosed: true, wantGate: upgradeGate},
+		{name: "the upgrade closes its own gate again", existing: upgradeGate, parkDir: upgradeGate, wantClosed: true, wantGate: upgradeGate},
+		{name: "the upgrade leaves a gate that a caller closed", existing: callerGate, parkDir: upgradeGate, wantGate: callerGate},
+		{name: "the upgrade leaves a gate that an operator closed by hand", existing: byHandGate, parkDir: upgradeGate, wantGate: byHandGate},
+		{name: "the upgrade takes over a gate that an interrupted defragmentation left closed", existing: defragGate, parkDir: upgradeGate, wantClosed: true, wantGate: upgradeGate},
+		{name: "the defragmentation takes over a gate that an interrupted upgrade left closed", existing: upgradeGate, parkDir: defragGate, wantClosed: true, wantGate: defragGate},
+		{name: "a caller takes over a gate that the upgrade left closed", existing: upgradeGate, parkDir: callerGate, wantClosed: true, wantGate: callerGate},
 	}
 
 	for _, tc := range tests {
