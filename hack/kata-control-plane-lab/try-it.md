@@ -18,7 +18,7 @@ State of 2026-11-28. The guide uses two public branches:
 ## What you need
 
 - One Linux machine on amd64 or arm64 with `/dev/kvm`. In a virtual machine, nested virtualization must be on. Each step is tested on amd64. On arm64 the first run is in work, and "On arm64" has its state.
-- 16 CPUs, 48 GB of memory and 100 GB of free disk. Our lab machine was larger, and a smaller one never ran.
+- 16 CPUs, 48 GB of memory and 130 GB of free disk. The first run, on a machine with 64 CPUs, measured both. Memory: 18 GB for Part 1 with a cluster of three control plane nodes and one worker, and 25 GB at the highest point, a rollout with three workers. Disk: about 85 GB for Part 1 and the first cluster, and about 110 GB at the fullest, with the second image pair of scenario 8 and the workers of scenario 9. A smaller machine never ran.
 - `sudo` rights, for `modprobe`, `sysctl` and `losetup`.
 - Docker 28 or newer with `buildx`. A container must reach the internet. The user of the run must be able to call `docker` with no `sudo`.
 - `git`, `make`, a C compiler, `python3`, `curl`, `jq`, `tar` with `zstd`, Go 1.27, `kind`, `kubectl`, `helm`, `clusterctl`, and for the kernel build `yq`, `flex`, `bison`, `patch` and the headers of `libelf`.
