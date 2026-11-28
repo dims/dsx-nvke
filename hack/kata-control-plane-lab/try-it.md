@@ -431,7 +431,7 @@ kc label node <name of that worker> nvke.nvidia.com/reboot=try-1
 
 ### Scenario 7, a full failure domain
 
-**Ran in the first run of 2026-11-28**, at that time before scenario 8 and with a roll to the tag `podvm-node:local`. In the lab a worker that was a pod took the place. Here a plain pod does.
+**Ran in the first run of 2026-11-28, two times.** The first time it ran before scenario 8. The second time it ran in this place and with these commands, on a cluster that was made again. In the lab a worker that was a pod took the place. Here a plain pod does.
 
 Run this scenario last before the delete. After it NVKE avoids each kind worker that was full for 3 hours, and a later rollout of the control plane can wait that long. In the first run the next rollout did not go on.
 
@@ -469,10 +469,10 @@ kh -n nvke-system get podvmmachines --watch
 ```
 
 - **Pass.** One machine shows the reason `FailureDomainUnavailable`, and its pod stays Pending. About 16 minutes later NVKE deletes that node and makes a new one on another kind worker. The rollout then ends with three new nodes.
-- **It can happen two times.** The new node goes to a kind worker that already runs a control plane node, and that worker is full then. In the first run the machine for the next old node on that worker waited 16 minutes too.
-- **What stays.** At the end one kind worker runs two control plane nodes and one runs none. NVKE avoids the two workers that were full for 3 hours. In the first run that left only the worker with two control plane nodes for a new node, which is full, so the next rollout did not go on. NVKE shows nothing of this, and the log of the controller is silent about it.
+- **It can happen two times.** The new node goes to a kind worker that already runs a control plane node. If NVKE has not yet replaced the old node of that worker, the worker is full then, and the machine for that old node waits 16 minutes too. That happened the first time. The second time NVKE came to the full worker last, and one wait was enough.
+- **What stays.** At the end one kind worker runs two control plane nodes and one runs none. NVKE avoids each worker that was full for 3 hours. The first time that left only the worker with two control plane nodes for a new node, which is full, so the next rollout did not go on. NVKE shows nothing of this, and the log of the controller is silent about it.
 - **After it.** `kh -n podvm-clusters delete pod/blocker pvc/blocker-var pvc/blocker-etcd`.
-- **Time.** In the first run 42 minutes, with two waits of 16 minutes. The loop of scenario 5 on the API had 2419 of 2419 calls with an answer.
+- **Time.** In the first run 42 minutes with two waits of 16 minutes the first time, and 26 minutes with one wait the second time. The loop of scenario 5 on the API had an answer to each call, 2419 and 1522.
 
 ### Scenario 10, delete the cluster
 
@@ -488,7 +488,7 @@ docker ps --format '{{.Names}}'
 ```
 
 - **Pass.** No cluster, no pod, no claim, no Service and no provider object. Twelve volumes with the status `Available` again, with no step by hand. In `docker ps` only the four kind nodes, and the build container of `buildx` if step 6 made one.
-- **Time.** In the first run the cluster was gone from `nvkectl` after 100 s, and the twelve volumes were `Available` after 121 s.
+- **Time.** In the first run the delete ran two times. A cluster with one worker was gone from `nvkectl` after 100 s, and the twelve volumes were `Available` after 121 s. A cluster with three workers, right after scenario 7, took 48 s and 59 s.
 
 ## Not possible from public interfaces yet
 
