@@ -482,11 +482,13 @@ func TestLiveDeleteVIPOverridePreservesSafety(t *testing.T) {
 		allow     bool
 		count     int
 		wantError string
+		endpoint  string
 	}{
 		{name: "default rejects without VIP", count: 4, wantError: "controlPlaneVIP"},
 		{name: "override permits replacement intent", allow: true, count: 4},
 		{name: "override keeps quorum floor", allow: true, count: 3, wantError: "below the minimum of 3"},
 		{name: "override protects last joined node", allow: true, count: 1, wantError: "last joined control-plane node"},
+		{name: "controlPlaneEndpoint permits replacement intent", endpoint: "lb.example.com:6443", count: 4},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -498,9 +500,9 @@ func TestLiveDeleteVIPOverridePreservesSafety(t *testing.T) {
 			target := cpNodes[0]
 			tx := &testutil.MockTx{}
 			tx.On("GetNode", mock.Anything, target.ID).Return(target, nil).Once()
-			tx.On("GetClusterForUpdate", mock.Anything, target.ClusterID).Return(db.Cluster{ID: target.ClusterID}, nil).Once()
+			tx.On("GetClusterForUpdate", mock.Anything, target.ClusterID).Return(db.Cluster{ID: target.ClusterID, ControlPlaneEndpoint: tc.endpoint}, nil).Once()
 			tx.On("GetNodeForUpdate", mock.Anything, target.ID).Return(target, nil).Once()
-			if tc.allow {
+			if tc.allow || tc.endpoint != "" {
 				expectControlPlaneCensus(tx, cpNodes)
 			}
 			if tc.wantError == "" {

@@ -766,6 +766,16 @@ func TestClusterHasStableControlPlaneEndpoint(t *testing.T) {
 			cluster: db.Cluster{ControlPlaneVIP: "  "},
 			want:    false,
 		},
+		{
+			name:    "a control-plane endpoint that NVKE does not manage is set",
+			cluster: db.Cluster{ControlPlaneEndpoint: "lb.example.com:6443"},
+			want:    true,
+		},
+		{
+			name:    "a blank control-plane endpoint counts as unset",
+			cluster: db.Cluster{ControlPlaneEndpoint: " "},
+			want:    false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -813,6 +823,7 @@ func TestClusterControlPlaneEndpointIsStored(t *testing.T) {
 			stored, err := q.GetCluster(ctx, created.ID)
 			require.NoError(t, err)
 			assert.Equal(t, tt.endpoint, stored.ControlPlaneEndpoint)
+			assert.Equal(t, tt.endpoint != "", stored.HasStableControlPlaneEndpoint())
 
 			stored.KubernetesVersion = "1.30"
 			_, err = q.UpdateCluster(ctx, &stored)
