@@ -91,11 +91,15 @@ BASE_IMAGE=cwe-capd-kindest-node:local IMAGE=podvm-node:local \
   cluster-api-provider-podvm/node-image/build-image.sh
 make -C controller docker-build-local IMG=nvke-controller:local
 make -C cluster-api-provider-podvm docker-build PLATFORMS=linux/amd64 BUILDX_OUTPUT=type=docker
+docker build --tag docker.local/cwe-profiles:tilt controller/test/fixtures
 make -C cli build
 export PATH="${PWD}/cli/bin:${PATH}"
 ```
 
-The last two lines build `nvkectl` and put it on the search path.
+`docker.local/cwe-profiles:tilt` is the image of the profiles fixture. The
+deploy path names it, as the `capnico-e2e` path does, and an init container of
+the NVKE controller copies the profiles out of it. The last two lines build
+`nvkectl` and put it on the search path.
 
 ## 3. Bring the host cluster up
 
@@ -103,10 +107,10 @@ The last two lines build `nvkectl` and put it on the search path.
 controller/hack/podvm-kind/up.sh
 ```
 
-Then load the three images into the kind nodes:
+Then load the four images into the kind nodes:
 
 ```bash
-for image in podvm-node:local nvke-controller:local cluster-api-provider-podvm:latest; do
+for image in podvm-node:local nvke-controller:local cluster-api-provider-podvm:latest docker.local/cwe-profiles:tilt; do
   for node in $(kind get nodes --name podvm); do
     docker save --platform linux/amd64 "${image}" | docker exec -i "${node}" ctr -n k8s.io images import --digests -
   done
