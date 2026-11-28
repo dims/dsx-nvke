@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - bases/infrastructure.cluster.x-k8s.io_podvmclusters.yaml
+  - bases/infrastructure.cluster.x-k8s.io_podvmmachines.yaml
+  - bases/infrastructure.cluster.x-k8s.io_podvmmachinetemplates.yaml
