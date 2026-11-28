@@ -802,6 +802,9 @@ func (s *NodeAgentServer) restartStaticPodContainer(
 func (s *NodeAgentServer) handOffParkedManifestsToCaller() error {
 	var moved []string
 	var errs []error
+	// A control plane endpoint gate the defragmentation closed goes with the
+	// manifests. StartKubeVipRestore opens it.
+	errs = append(errs, s.handOffControlPlaneEndpointGateToCaller())
 	for _, manifestName := range []string{defaultKubeAPIServerManifestName, defaultKubeVipManifestName} {
 		src := s.rootedPath(filepath.Join(defaultEtcdDefragParkDir, manifestName))
 		dst := s.rootedPath(filepath.Join(defaultStaticPodBackupDir, manifestName))

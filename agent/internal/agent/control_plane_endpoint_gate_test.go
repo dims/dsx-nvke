@@ -17,7 +17,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
+	pb "github.com/dsx-ai-factory/nvke/agent/pkg/agent/proto"
 	nvkeutils "github.com/dsx-ai-factory/nvke/agent/pkg/utils"
 )
 
@@ -394,6 +396,178 @@ func TestKubeVipRestoreOpensTheControlPlaneEndpointGate(t *testing.T) {
 		},
 	}, func(ctx context.Context, s *NodeAgentServer, progress nodeAgentOperationProgress) error {
 		return s.runKubeVipRestore(ctx, progress)
+	})
+}
+
+// The etcd defragmentation withdraws and restores in one call, so it gets the
+// gate through the calls it already makes. A gate it closes names its own park
+// directory, which is what lets the agent open it again without a caller.
+func TestRunEtcdDefragUsesTheControlPlaneEndpointGate(t *testing.T) {
+	const (
+		reclaimed   = pb.GetEtcdDefragStatusResponse_OUTCOME_RECLAIMED
+		restored    = pb.GetEtcdDefragStatusResponse_OUTCOME_FAILED_RESTORED
+		notRestored = pb.GetEtcdDefragStatusResponse_OUTCOME_FAILED_NOT_RESTORED
+	)
+
+	tests := []struct {
+		name    string
+		kubeVip bool
+		setup   []gateSetup
+
+		wantErr             bool
+		wantOutcome         pb.GetEtcdDefragStatusResponse_Outcome
+		wantMessage         []string
+		wantSteps           []string // the whole sequence, when it is set
+		wantStepsContain    []string
+		wantStepsNotContain []string
+		wantEvents          []string
+		wantGate            string
+	}{
+		{
+			name:        "gate only: the gate is closed while etcd restarts and open when the node is back",
+			setup:       []gateSetup{peersOn(testBackendAddress, testBackendPeer, "")},
+			wantOutcome: reclaimed,
+			wantSteps: slices.Concat(
+				[]string{stepEtcdDefragPreflight, stepEtcdDefragTransferLeader},
+				gateWithdrawalSteps,
+				[]string{
+					stepResolvingKubeVip, stepStoppingKubeAPIServer, stepWaitingKubeAPIServerExit,
+					stepEtcdDefragStoppingEtcd, stepEtcdDefragWaitingRestart, stepEtcdDefragWaitingHealthy,
+					stepEtcdDefragReturningToService, stepRestoringKubeAPIServer, stepWaitingKubeAPIServerStart,
+					// The gate opens last, after the apiserver is ready.
+					stepWaitingKubeAPIServerReady, stepResolvingKubeVip, stepOpeningEndpointGate,
+					stepEtcdDefragMeasuring,
+				},
+			),
+			wantEvents: []string{closedBackendPeer + defragGate, "stop-etcd gate=" + defragGate},
+		},
+		{
+			name:             "both: kube-vip and the gate are withdrawn for the restart and both are returned",
+			kubeVip:          true,
+			setup:            []gateSetup{peersOn(testBackendAddress, testBackendPeer, "")},
+			wantOutcome:      reclaimed,
+			wantStepsContain: []string{stepClosingEndpointGate, stepStoppingKubeVip, stepRestoringKubeVip, stepOpeningEndpointGate},
+			wantEvents:       []string{closedBackendPeer + defragGate, "stop-etcd gate=" + defragGate},
+		},
+		{
+			name:                "gate only: a load balancer that still sends connections returns the node to service and opens the gate",
+			setup:               []gateSetup{peersOn(testBackendAddress, "", testBackendPeer)},
+			wantOutcome:         restored,
+			wantMessage:         []string{"control plane endpoint backend socket quiet window failed"},
+			wantStepsContain:    []string{stepOpeningEndpointGate},
+			wantStepsNotContain: []string{stepStoppingKubeAPIServer, stepEtcdDefragStoppingEtcd},
+		},
+		{
+			name:                "gate only: a failed gate write returns the node to service with the gate open",
+			setup:               []gateSetup{gateWriteFails},
+			wantOutcome:         restored,
+			wantMessage:         []string{"close control plane endpoint gate", "disk full"},
+			wantStepsNotContain: []string{stepStoppingKubeAPIServer, stepEtcdDefragStoppingEtcd, stepOpeningEndpointGate},
+		},
+		{
+			name:                "gate only: a member that never returns healthy leaves the gate closed and hands it to the caller",
+			setup:               []gateSetup{etcdNeverHealthyAfterRestart},
+			wantErr:             true,
+			wantOutcome:         notRestored,
+			wantMessage:         []string{"did not return healthy", "left out of service"},
+			wantStepsNotContain: []string{stepOpeningEndpointGate},
+			wantEvents:          []string{"stop-etcd gate=" + defragGate},
+			wantGate:            callerGate,
+		},
+		{
+			name:                "gate only: a gate that a caller closed stays closed and stays the caller's",
+			setup:               []gateSetup{gateClosedBy(callerGate), peersOn(testBackendAddress, testBackendPeer)},
+			wantOutcome:         reclaimed,
+			wantStepsNotContain: []string{stepWaitingEndpointGateSettle, stepClosingEndpointBackendSockets, stepOpeningEndpointGate},
+			wantEvents:          []string{"stop-etcd gate=" + callerGate},
+			wantGate:            callerGate,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s, node := endpointGateTestServer(t, tc.kubeVip, true, tc.setup...)
+			progress := &fakeOperationProgress{}
+
+			err := s.runEtcdDefrag(context.Background(), progress)
+
+			assert.Equal(t, tc.wantErr, err != nil, "error: %v", err)
+			result := decodeDefragResult(t, progress)
+			assert.Equal(t, int32(tc.wantOutcome), result.Outcome)
+			for _, want := range tc.wantMessage {
+				assert.Contains(t, result.ErrorMessage, want)
+			}
+			if tc.wantSteps != nil {
+				assert.Equal(t, tc.wantSteps, progress.steps)
+			}
+			assert.Subset(t, progress.steps, tc.wantStepsContain)
+			for _, unwanted := range tc.wantStepsNotContain {
+				assert.NotContains(t, progress.steps, unwanted)
+			}
+			assert.Equal(t, tc.wantEvents, node.events)
+			assert.Equal(t, tc.wantGate, node.gateState())
+			if tc.kubeVip {
+				assert.True(t, staticPodManifestIsActive(t, s, defaultKubeVipManifestName), "kube-vip must be restored")
+				assert.Contains(t, node.loopbackVIPs, testKubeVipAddress)
+			}
+
+			// A restart of the agent leaves the gate as the defragmentation left it.
+			require.NoError(t, s.ReconcileInterruptedStaticPodParks(context.Background()))
+			assert.Equal(t, tc.wantGate, node.gateState())
+		})
+	}
+}
+
+// etcdNeverHealthyAfterRestart fails each etcd status call after the first two,
+// which are the preflight and the leadership check of a defragmentation.
+func etcdNeverHealthyAfterRestart(_ *testing.T, s *NodeAgentServer, _ *endpointGateNode) {
+	client := s.etcdClient.(*fakeEtcdMemberClient)
+	healthy := client.statusFn
+	client.statusFn = func(ctx context.Context, call int) (*clientv3.StatusResponse, error) {
+		if call >= 3 {
+			return nil, errors.New("connection refused")
+		}
+		return healthy(ctx, call)
+	}
+}
+
+// The repair of stale state at startup. It opens a gate under the rule that
+// decides which parked manifests it puts back: only what the defragmentation
+// owes. It closes no socket, so no case expects an event.
+func TestReconcileInterruptedStaticPodParksOpensAStaleControlPlaneEndpointGate(t *testing.T) {
+	runGateCases(t, []gateCase{
+		{
+			name: "a gate closed by an interrupted defragmentation is opened and kube-apiserver is put back",
+			setup: []gateSetup{parkedIn(defragGate, defaultKubeAPIServerManifestName), gateClosedBy(defragGate), func(_ *testing.T, s *NodeAgentServer, _ *endpointGateNode) {
+				s.NodeStatus.NodeAgentOperations = runningEtcdDefragRecord()
+			}},
+		},
+		{name: "a gate closed by an interrupted defragmentation is opened when no manifest is parked", setup: []gateSetup{gateClosedBy(defragGate)}},
+		{
+			name:    "both: kube-vip parked by an interrupted defragmentation is put back and the gate is opened",
+			kubeVip: true,
+			setup:   []gateSetup{parkedIn(defragGate, defaultKubeAPIServerManifestName, defaultKubeVipManifestName), gateClosedBy(defragGate)},
+		},
+		{name: "a gate closed by a graceful shutdown stays closed", setup: []gateSetup{gateClosedBy(callerGate)}, wantGate: callerGate},
+		{
+			name: "a gate handed to the caller by a defragmentation that gave up on the member stays closed",
+			setup: []gateSetup{parkedIn(defragGate, defaultKubeAPIServerManifestName), gateClosedBy(defragGate), func(t *testing.T, s *NodeAgentServer, _ *endpointGateNode) {
+				require.NoError(t, s.handOffParkedManifestsToCaller())
+			}},
+			wantGate:   callerGate,
+			wantParked: []string{defaultKubeAPIServerManifestName},
+		},
+		{name: "a gate that an operator closed by hand stays closed", setup: []gateSetup{gateClosedBy(byHandGate)}, wantGate: byHandGate},
+		{name: "no gate file is a clean start"},
+		{
+			name:     "kube-vip only: with no gate flag a file at the gate path is left alone",
+			kubeVip:  true,
+			noGate:   true,
+			setup:    []gateSetup{parkedIn(defragGate, defaultKubeVipManifestName), gateClosedBy(defragGate)},
+			wantGate: defragGate,
+		},
+	}, func(ctx context.Context, s *NodeAgentServer, _ nodeAgentOperationProgress) error {
+		return s.ReconcileInterruptedStaticPodParks(ctx)
 	})
 }
 
