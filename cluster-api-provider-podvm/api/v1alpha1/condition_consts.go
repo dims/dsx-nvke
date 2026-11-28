@@ -26,3 +26,26 @@ const (
 	// a PodVMCluster that is older. The older cluster keeps its range.
 	AddressRangeOverlapReason = "AddressRangeOverlap"
 )
+
+// Reasons of the Ready condition of a PodVMMachine.
+const (
+	// WaitingForOwnerReason means the Cluster API machine controller has not
+	// yet set the owner reference on this object.
+	WaitingForOwnerReason = "WaitingForOwner"
+
+	// WaitingForClusterReason means the PodVMCluster of this machine does not
+	// exist yet.
+	WaitingForClusterReason = "WaitingForCluster"
+
+	// WaitingForBootstrapDataReason means the owner Machine names no bootstrap
+	// data Secret yet.
+	WaitingForBootstrapDataReason = "WaitingForBootstrapData"
+
+	// NoAddressAvailableReason means every address of the range of the
+	// cluster is in use.
+	NoAddressAvailableReason = "NoAddressAvailable"
+
+	// WaitingForPodReason means the pod exists and does not run yet, or the
+	// pod of a provisioned machine was lost and its new pod does not run yet.
+	WaitingForPodReason = "WaitingForPod"
+)

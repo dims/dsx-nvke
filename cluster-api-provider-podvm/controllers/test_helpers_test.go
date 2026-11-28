@@ -4,16 +4,21 @@
 package controllers
 
 import (
+	"context"
+	"log/slog"
 	"net/netip"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -71,6 +76,51 @@ func newInfraClusterNamed(name, cidr string) *infrav1.PodVMCluster {
 	}
 }
 
+func newCAPICluster() *clusterv1.Cluster {
+	return &clusterv1.Cluster{
+		TypeMeta:   metav1.TypeMeta{APIVersion: clusterv1.GroupVersion.String(), Kind: "Cluster"},
+		ObjectMeta: metav1.ObjectMeta{Name: testClusterName, Namespace: testNamespace},
+		Spec: clusterv1.ClusterSpec{InfrastructureRef: clusterv1.ContractVersionedObjectReference{
+			APIGroup: infrav1.GroupName, Kind: "PodVMCluster", Name: testClusterName,
+		}},
+	}
+}
+
+func bootstrapDataSecretName(machineName string) string { return machineName + "-bootstrap-data" }
+
+func newOwnerMachine() *clusterv1.Machine { return newOwnerMachineNamed(testMachineName) }
+
+// newOwnerMachineNamed builds a control plane Machine the way the NVKE
+// controller does: the cluster label, the control plane label, and the name of
+// the bootstrap data Secret.
+func newOwnerMachineNamed(name string) *clusterv1.Machine {
+	return &clusterv1.Machine{
+		TypeMeta: metav1.TypeMeta{APIVersion: clusterv1.GroupVersion.String(), Kind: "Machine"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: testNamespace,
+			Labels: map[string]string{
+				clusterv1.ClusterNameLabel:         testClusterName,
+				clusterv1.MachineControlPlaneLabel: "",
+			},
+		},
+		Spec: clusterv1.MachineSpec{
+			ClusterName: testClusterName,
+			Bootstrap:   clusterv1.Bootstrap{DataSecretName: ptr.To(bootstrapDataSecretName(name))},
+			InfrastructureRef: clusterv1.ContractVersionedObjectReference{
+				APIGroup: infrav1.GroupName, Kind: "PodVMMachine", Name: name,
+			},
+		},
+	}
+}
+
+func newBootstrapDataSecret(machineName string) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: bootstrapDataSecretName(machineName), Namespace: testNamespace},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"value": []byte(testBootstrapData)},
+	}
+}
+
 func newInfraMachine(name string) *infrav1.PodVMMachine {
 	isController := true
 	return &infrav1.PodVMMachine{
@@ -109,6 +159,18 @@ func newAllocatedInfraMachine(name, address string) *infrav1.PodVMMachine {
 	return machine
 }
 
+// machineObjects returns everything one machine needs to be reconciled.
+func machineObjects(machine *infrav1.PodVMMachine) []client.Object {
+	return []client.Object{
+		newPodNamespace(),
+		newInfraCluster(),
+		newCAPICluster(),
+		newOwnerMachineNamed(machine.Name),
+		newBootstrapDataSecret(machine.Name),
+		machine,
+	}
+}
+
 func newFakeClient(t *testing.T, objects ...client.Object) client.Client {
 	t.Helper()
 	return fake.NewClientBuilder().
@@ -116,6 +178,38 @@ func newFakeClient(t *testing.T, objects ...client.Object) client.Client {
 		WithObjects(objects...).
 		WithStatusSubresource(&infrav1.PodVMMachine{}, &infrav1.PodVMCluster{}, &corev1.Pod{}).
 		Build()
+}
+
+func newMachineReconcilerForTest(t *testing.T, objects ...client.Object) (*MachineReconciler, client.Client) {
+	t.Helper()
+	k8sClient := newFakeClient(t, objects...)
+	return NewMachineReconciler(k8sClient, k8sClient, slog.New(slog.DiscardHandler)), k8sClient
+}
+
+func machineRequest(name string) ctrl.Request {
+	return ctrl.Request{NamespacedName: types.NamespacedName{Namespace: testNamespace, Name: name}}
+}
+
+func reconcileMachine(t *testing.T, reconciler *MachineReconciler, name string) ctrl.Result {
+	t.Helper()
+	result, err := reconciler.Reconcile(context.Background(), machineRequest(name))
+	require.NoError(t, err)
+	return result
+}
+
+func getInfraMachine(t *testing.T, k8sClient client.Client, name string) *infrav1.PodVMMachine {
+	t.Helper()
+	machine := &infrav1.PodVMMachine{}
+	require.NoError(t, k8sClient.Get(context.Background(),
+		client.ObjectKey{Namespace: testNamespace, Name: name}, machine))
+	return machine
+}
+
+// requireGone asserts that an object of the pod namespace does not exist.
+func requireGone(t *testing.T, k8sClient client.Client, obj client.Object, name string) {
+	t.Helper()
+	err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: testPodNamespace, Name: name}, obj)
+	require.True(t, apierrors.IsNotFound(err), "expected %T %s to be gone, got %v", obj, name, err)
 }
 
 func requireReadyCondition(t *testing.T, conditions []metav1.Condition, status metav1.ConditionStatus, reason string) {
