@@ -31,8 +31,12 @@ same set on one Linux machine, in a kind cluster, so that the
 - `sudo` rights, for `modprobe`, `sysctl` and `losetup`.
 - A machine where a container reaches the internet. A kind node installs one
   package and pulls images, and a node of the tenant cluster pulls images.
-- About 20 Gi of memory for three control plane nodes of 6 Gi, and disk space
-  for six volume places of 28 G as sparse files.
+- About 18 Gi of memory for a cluster of three control plane nodes of 6 Gi and
+  one worker, with the host cluster and the management plane. A rollout adds a
+  fourth control plane node, and with three workers the first run used 25 Gi.
+- About 85 G of disk for the builds, the images in the kind nodes and one
+  cluster. The six volume places of 28 G are sparse files and held about 7 G.
+  Each more node image takes 12 to 15 G in the four kind nodes.
 
 ## The addresses
 
