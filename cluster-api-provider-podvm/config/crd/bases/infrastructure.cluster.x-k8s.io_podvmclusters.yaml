@@ -185,9 +185,19 @@ spec:
                 description: |-
                   RuntimeClassName is the RuntimeClass of each pod. It must name a Kata
                   runtime whose guest kernel has what a Kubernetes node needs.
+
+                  It cannot change. The provider makes the pod of a machine again after a
+                  lost pod and after a reboot request, from the cluster as it is then. So
+                  a new value would move each machine that exists to another runtime at
+                  its next pod, in no order and on the volumes of its old pod. What the
+                  RuntimeClass names can change in the host cluster, for example with a
+                  new version of the runtime.
                 maxLength: 253
                 minLength: 1
                 type: string
+                x-kubernetes-validations:
+                - message: runtimeClassName is immutable
+                  rule: self == oldSelf
             required:
             - addressRange
             - networkAttachment

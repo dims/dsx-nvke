@@ -156,6 +156,11 @@ func TestPodVMClusterRulesAboutAChange(t *testing.T) {
 			refusal: "podNamespace is immutable",
 		},
 		{
+			name:    "another runtime class",
+			change:  func(spec map[string]any) { spec["runtimeClassName"] = "kata-other" },
+			refusal: "runtimeClassName is immutable",
+		},
+		{
 			name: "another address block",
 			change: func(spec map[string]any) {
 				spec["addressRange"] = map[string]any{"cidr": "198.51.100.128/26", "prefixLength": int64(24)}

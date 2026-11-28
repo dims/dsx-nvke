@@ -100,8 +100,16 @@ type PodVMClusterSpec struct {
 
 	// RuntimeClassName is the RuntimeClass of each pod. It must name a Kata
 	// runtime whose guest kernel has what a Kubernetes node needs.
+	//
+	// It cannot change. The provider makes the pod of a machine again after a
+	// lost pod and after a reboot request, from the cluster as it is then. So
+	// a new value would move each machine that exists to another runtime at
+	// its next pod, in no order and on the volumes of its old pod. What the
+	// RuntimeClass names can change in the host cluster, for example with a
+	// new version of the runtime.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="runtimeClassName is immutable"
 	RuntimeClassName string `json:"runtimeClassName"`
 
 	// NetworkAttachment names the NetworkAttachmentDefinition of the node
