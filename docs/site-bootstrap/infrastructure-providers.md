@@ -205,6 +205,8 @@ The management plane then has to accept `infra` requests and reach the provider'
 | `nodeAgent.spireAttestationMethod` | `joinToken`, which needs `spiffe.enabled` `true`. A pod has no TPM. The method applies to every provider's new nodes |
 | `env` | `NODE_REBOOT_SOFT_REBOOT_ENABLED` with the value `"false"`. The in-guest reboot that the controller tries first gives a pod no new boot ID, and with the default the controller waits up to 30 minutes for one before it asks the provider for a new pod |
 
+`controller/deploy/podvm-e2e` is a deploy path with these values. It also sets `nvkeOIDCAuth.enabled` to `false`: the provider reads the kubeconfig Secret of a cluster, and with OIDC that kubeconfig needs the SPIRE exec-auth program, which the image of the provider does not have. [Kind host cluster for the pod VM provider](../../controller/hack/podvm-kind/README.md) brings up a host cluster on one machine and installs the path there.
+
 ## What This Page Does Not Cover
 
 - **The management plane (NVKE controller) install.** Separate step, and it must come after this one.
