@@ -56,6 +56,7 @@ LICENSE_SOURCE_FILTER = awk '!/(^|\/)vendor\// && !/(^|\/)testdata\// && !/^gene
 # public; the Go module cache supplies them after the first download.
 WORK_MODULES := agent \
                 auth \
+                cluster-api-provider-podvm \
                 cluster-api-provider-provisioned \
                 controller \
                 controller/api \
@@ -355,6 +356,7 @@ CHARTS_DEPENDENTS := cli
 RACE_MODULES := agent \
                 auth \
                 cli \
+                cluster-api-provider-podvm \
                 cluster-api-provider-provisioned \
                 controller \
                 controller/k8s-apis \

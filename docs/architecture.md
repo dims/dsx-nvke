@@ -1,7 +1,7 @@
 # Architecture overview
 
 NVKE (NVIDIA Kubernetes Engine) orchestrates the lifecycle of Kubernetes clusters
-on NVIDIA infrastructure. The repository is a Go workspace of fourteen modules. Three
+on NVIDIA infrastructure. The repository is a Go workspace of fifteen modules. Three
 of them run in production: the NVKE controller, deployed as a Helm chart,
 the node agent, installed on each node as a Debian package and run by systemd,
 and the Cluster API infrastructure provider, deployed into the same cluster as
@@ -34,13 +34,14 @@ CRD types, and test and development tooling.
               └──────────────────────┘  └─────────────┘
 ```
 
-## The fourteen modules
+## The fifteen modules
 
 | Module | Binary | What it is |
 |---|---|---|
 | `controller/` | `controller` | The NVKE controller: REST API, Temporal workflows, Postgres, reconcilers. Source is `cmd/worker/` |
 | `agent/` | `agent` | The node agent, a gRPC server that runs on every managed node |
 | `cluster-api-provider-provisioned/` | `manager` | Cluster API infrastructure provider for hosts NVKE provisions before CAPI bootstraps them |
+| `cluster-api-provider-podvm/` | `manager` | Cluster API infrastructure provider that runs each machine as a Kata pod of the host cluster. Not part of a release |
 | `cli/` | `nvkectl` | The command line client |
 | `controller/api/` | none | The OpenAPI spec and the generated server and client types |
 | `controller/deploy/charts/` | none | The controller and postgresql Helm charts, embedded so `nvkectl` installs the charts of its own commit |
