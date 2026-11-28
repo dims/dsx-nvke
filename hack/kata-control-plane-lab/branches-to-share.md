@@ -1,6 +1,6 @@
 # Branches to share: NVKE control plane nodes as Kata pods
 
-Last update: 2026-11-28, 08:10 local time. Each tip in the state table was the tip of its branch on the fork at that time (fetched at 08:10).
+Last update: 2026-11-28, 08:14 local time. Each tip in the state table was the tip of its branch on the fork at that time (fetched at 08:14).
 
 This page lists the only branches that the larger team needs. Each of the ten is meant to become one pull request. No pull request is open yet. One more branch, `integration/control-plane-kata-pods`, holds the commits of branches 1 to 9 together, for a person who wants to try the feature. It is not for a pull request. Every other branch on the two forks is lab material and is not for sharing.
 
@@ -19,12 +19,12 @@ This page lists the only branches that the larger team needs. Each of the ten is
 | 6 | `feat/agent-endpoint-health-gate` | `edddaff0` | 4 | 1,107 added, 3 removed | Ready. A fresh review found no bug, and its small changes are in since 2026-11-28 |
 | 7 | `feat/capi-failure-domain-unavailable` | `23c1ed00` | 1 | 306 added, 6 removed | A fresh review found no bug. Small changes are in work: neutral names in the test data, fewer tests, and a paragraph in the docs |
 | 8 | `feat/cluster-api-provider-podvm` | `0e3453ef` | 21 | 10,494 added, 9 removed | Five new commits, on the fork since 2026-11-28: the provider makes the Service of the control plane endpoint, the controller chart grants the rights, samples, and an install text that works. A fresh review found no must fix. Its smaller points are in work |
-| 9 | `feat/podvm-node-image` | `9164f2f0` | 3, on top of branch 8 | 893 added, 2 removed | Not ready. The image builds, and it has not run in a pod. A fresh review found one fault in the entry point (it formats a volume when the check of the volume fails for another cause) and one in the bootstrap program (a file mode with no quotes is read wrong), and the README holds numbers that only the lab has. In work |
+| 9 | `feat/podvm-node-image` | `f5987a67` | 3, on top of branch 8 | 1,253 added, 2 removed | The points of the fresh review are in since 2026-11-28, 08:13: a volume is formatted only when two checks agree that it is empty, a file mode is read as cloud-init reads it, and the README has no lab number and has the full kernel build command. The image builds. It has not run in a pod yet, and that run is the open point |
 | 10 | `fix/agent-kill-child-cgroups` (Kata) | `e0f5597` | 1 | 161 added, 6 removed | Ready |
 
 "Ready" means that the commits are final in content. After the rework, all branches are built together again and the lab tests run again. This page gets the result.
 
-In work on 2026-11-28: branches 7, 8 and 9 get the points of the fresh reviews, so these three tips change again. Branch 5 got its points at 08:05. One more branch is in work and is not on the fork yet: `feat/podvm-deploy-path`, a deploy path of the repository with the pod provider.
+In work on 2026-11-28: branches 7 and 8 get the points of the fresh reviews, so these two tips change again, and branch 9 then moves onto the new tip of branch 8. Branch 5 got its points at 08:05 and branch 9 at 08:13. One more branch is in work and is not on the fork yet: `feat/podvm-deploy-path`, a deploy path of the repository with the pod provider.
 
 Before a pull request, each branch still needs these things. They are rules of the repository (`CONTRIBUTING.md`, `docs/pull-request-triage.md`):
 
@@ -48,11 +48,11 @@ Before a pull request, each branch still needs these things. They are rules of t
 
 https://github.com/dims/dsx-nvke/tree/integration/control-plane-kata-pods
 
-- What it is: the commits of branches 1 to 7 and of branch 9 (which brings branch 8), picked in the order above onto the main commit `d625fcfa`. It has no code of its own. Tip `e62ddab5`, 41 commits.
+- What it is: the commits of branches 1 to 7 and of branch 9 (which brings branch 8), picked in the order above onto the main commit `d625fcfa`. It has no code of its own. Tip `3bf90170`, 41 commits.
 - What it is for: one tree to build the agent, the controller, the simulator, the provider and the node image from, for a person who wants to try the feature. It is not for a pull request and not for review.
 - One place differs from the branches: branch 1 and branch 6 each add a field at the end of the same struct in `agent/internal/agent/agent.go`. The integration branch has both fields. Each other file that a branch changes is the same as in that branch.
 - It is built again after each change of a branch, so its history is rewritten. Do not base work on it.
-- Check at 08:05 on 2026-11-28: `make build` passes for all modules, and the tests of the agent module, of the provider module and of the two controller packages that the endpoint branch changes most pass.
+- Check at 08:14 on 2026-11-28: `make build` passes for all modules, and the tests of the agent module and of the provider module pass.
 - Kata Containers has its own integration branch, because the guest needs two changes of the Kata agent: https://github.com/dims/kata-containers/tree/integration/control-plane-kata-pods (tip `96a8d905b`). It is Kata 4.4.0 plus the commit of branch 10 and a backport of the open upstream pull request 13627 of another author, which lets an exec work after systemd starts in the container.
 
 ## What each branch does
@@ -210,14 +210,15 @@ https://github.com/dims/dsx-nvke/tree/feat/podvm-node-image
 
 The branch adds the node image for the pods, inside the provider module at `cluster-api-provider-podvm/node-image/`. The provider of branch 8 cannot be used without it. The branch sits on top of branch 8, and the three commits below are its own.
 
-- `83101bbf` feat(podvm): add the bootstrap program of the node image (248 lines of code, 149 of tests, two units)
-  - A small program that applies the bootstrap data of NVKE in the pod: it writes the files and runs the commands that a machine would get from cloud-init. Two systemd units run it, one early and one after the network is up.
-- `3e30c0f2` feat(podvm): add the node image for pod machines (276 lines in 9 files)
-  - The Dockerfile on top of the container node image of the repository, the entry point of the pod, the readiness program that the provider's probe runs, the agent flags of branch 6, and a check that Open vSwitch uses the datapath of the guest kernel. Also the build script `build-image.sh`, the link for the machine ID, the step that installs the CNI image package at build time with its helper `build-ctr`, and one exempt line in `hack/base-image-check.sh`, which is outside the module.
-- `9164f2f0` docs(podvm): describe the node image and its guest kernel options (180 lines)
-  - The README with the contract between the provider and the image, what Kata and the host cluster must give, and the two fragment files with the 11 options that the guest kernel needs.
-- Proof so far: the image builds with no network on top of the base image, and the checks of the module and of the repository root pass.
-- Open: this image is a shorter form of the image that the lab ran, and it differs in small points of behavior. It has not run in a pod yet. The lab test on the final branches covers it.
+- `0e55fd33` feat(podvm): add the bootstrap program of the node image (286 lines of code, 237 of tests, two units)
+  - A small program that applies the bootstrap data of NVKE in the pod: it writes the files and runs the commands that a machine would get from cloud-init. Two systemd units run it, one early and one after the network is up. It reads a file mode as cloud-init does and refuses a mode above 0777. On a later start it writes each file again that is not on the `/var` volume, so a file that the image also carries does not go back to the image content after a new pod.
+- `2d9de173` feat(podvm): add the node image for pod machines (388 lines in 11 files)
+  - The Dockerfile on top of the container node image of the repository, the build script, the entry point of the pod, the readiness program that the provider's probe runs, the agent flags of branch 6 (they do nothing with a node agent that has no gate), and a check that Open vSwitch uses the datapath of the guest kernel.
+  - `format-if-empty`: the entry point makes a filesystem on a volume only when `blkid` finds none and a read of the place of the ext4 superblock succeeds and finds none. Each other answer stops the start. The reason: `blkid` gives the same exit code for "nothing found" and for a read that fails, so its answer alone could erase `/var` or the etcd data after a passing fault.
+- `f5987a67` docs(podvm): describe the node image and its guest kernel options (302 lines)
+  - The README with the contract between the provider and the image, the two commands that build the base image with their inputs, the full command that builds the guest kernel with the two fragment files (11 options), how the kernel reaches a host node and how a custom runtime of the `kata-deploy` chart and a RuntimeClass point at it, the two changes of the Kata agent that are in no release, and the chart value for the join token.
+- Proof so far: the tests of the module pass, with tests for each point of the review, and the author broke the code in nine more ways and a test failed each time. The image builds with no network on top of the base image. The kernel build command of the README ran on the workstation and gave a kernel with the 11 options. That kernel did not boot in a test.
+- Open: the image has not run in a pod. It is a shorter form of the image that the lab ran. The first run must show a cluster create, a replace of the first node and of a joined node on the same volumes, a worker, and a restart in place. The base image commands and the Kata chart values of the README are written and did not run.
 
 ### 10. `fix/agent-kill-child-cgroups` (Kata Containers)
 
