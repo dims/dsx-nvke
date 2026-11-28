@@ -216,7 +216,9 @@ func TestMachineReconcilerReportsTheMachineWhenTheNodeAgentAnswers(t *testing.T)
 
 	// The startup probe passes.
 	startNodeAgent(t, k8sClient, testMachineName)
-	require.Equal(t, ctrl.Result{}, reconcileMachine(t, reconciler, testMachineName))
+	result := reconcileMachine(t, reconciler, testMachineName)
+	// The new cluster has no kubeconfig yet, so the look at the Node waits.
+	require.Equal(t, retryAfter, result.RequeueAfter)
 
 	machine := getInfraMachine(t, k8sClient, testMachineName)
 	require.Equal(t, []clusterv1.MachineAddress{
