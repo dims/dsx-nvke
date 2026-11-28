@@ -61,6 +61,8 @@ The controller chart value `supportedInfraProviders` lists the provider objects 
 
 `supportedInfraProviders` accepts only `nico`, `launchLayer` and `infra`. With any other value, the controller chart fails to render and the controller does not start. `infra` accepts raw Cluster API manifests from the caller and is not an infrastructure provider in its own right.
 
+A Cluster API infrastructure provider outside the set can still supply machines through `infra`: the caller sends that provider's own objects, and the deployment installs the provider and grants the controller RBAC for its kinds. `cluster-api-provider-podvm`, which runs control plane nodes as Kata pods and is not part of a release, is used this way. [Pod VM](../site-bootstrap/infrastructure-providers.md#pod-vm) lists its chart values. Such a provider has no provider object in the API and no deploy path under `deploy/`.
+
 Adding a provider is a change to NVKE, not configuration. It needs a Cluster API infrastructure provider for the platform and, in the `dsx-ai-factory/nvke` repository:
 
 - A provider object in the REST API, `controller/api/openapi.yaml`.
