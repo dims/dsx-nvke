@@ -1,0 +1,109 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Example CreateClusterRequest for a cluster whose control plane nodes are Kata
+# pods of the management cluster, through cluster-api-provider-podvm. The
+# workers are containers of nico-mock.
+#
+# Usage: nvkectl create cluster -f examples/podvm-cluster.yaml
+#
+# Prerequisites:
+#   - the host cluster of controller/hack/podvm-kind, with the provider and the
+#     controller/deploy/podvm-e2e deploy path installed. Its README has the run.
+#   - nvkectl config set-site --url http://localhost:8080 --kubeconfig <file>
+#
+# The addresses, the runtime class, the storage class and the pod namespace are
+# the ones that controller/hack/podvm-kind/up.sh makes. The UUIDs are
+# nico-mock's seeded identifiers.
+
+name: podvm-example
+# Matches the node image, as in nico-mock-cluster.yaml.
+controlPlaneKubernetesVersion: 1.36.4
+cniPlugin: ovn-kubernetes
+# The version of the CNI packages in the node image.
+cniVersion: 2.4.2
+etcdEncrypted: false
+enableCPNodeRecycling: true
+
+# The address of the control plane Service below. The provider makes that
+# Service, and MetalLB gives it this address.
+controlPlaneEndpoint: 172.28.255.220:6443
+
+network:
+  podCIDR: 10.113.0.0/16
+  serviceCIDR: 10.112.0.0/16
+
+infra:
+  cluster:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+    kind: PodVMCluster
+    metadata:
+      name: podvm-example
+    spec:
+      podNamespace: podvm-clusters
+      runtimeClassName: kata-podvm
+      networkAttachment:
+        name: nodenet
+      # The node addresses of the control plane pods, on the node network.
+      addressRange:
+        cidr: 172.28.1.0/24
+        prefixLength: 16
+      failureDomainLabelKey: topology.kubernetes.io/zone
+      controlPlaneService:
+        annotations:
+          metallb.io/loadBalancerIPs: 172.28.255.220
+
+controlPlaneConfig:
+  desiredCount: 3
+  maxSurge: 1
+  systemReservedMemory: "512Mi"
+  infra:
+    machineTemplate:
+      apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+      kind: PodVMMachineTemplate
+      spec:
+        template:
+          spec:
+            # The image is loaded into the kind nodes, so it is never pulled.
+            image: docker.io/library/podvm-node:local
+            imagePullPolicy: Never
+            resources:
+              cpu: "2"
+              memory: 6Gi
+            volumes:
+              var:
+                storageClassName: podvm-block
+                size: 20Gi
+              etcd:
+                storageClassName: podvm-block
+                size: 8Gi
+
+nodePools:
+  - name: worker
+    nodeNamePrefix: w
+    desiredNodeCount: 1
+    controlPlane: false
+    systemReservedMemory: "512Mi"
+    infra:
+      preKubeadmCommands:
+        - "mkdir -p /run/cluster-api"
+        - "echo success > /run/cluster-api/bootstrap-success.complete"
+      machineTemplate:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+        kind: NicoMachineTemplate
+        metadata:
+          name: podvm-example-worker-template
+        spec:
+          template:
+            spec:
+              # The cluster has no NicoCluster, so the template names the site.
+              siteID: 00000000-0000-0000-0000-000000000001
+              vpcID: 00000000-0000-0000-0000-000000000002
+              instanceTypeID: 00000000-0000-0000-0000-000000000005
+              cloudInitInjectHostname: true
+              ipxeScript: |
+                echo local-nico-worker
+              sshKeyGroupIDs:
+                - 00000000-0000-0000-0000-000000000004
+              interfaces:
+                - subnetID: 00000000-0000-0000-0000-000000000003
