@@ -1,0 +1,10 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Readiness probe of a control plane pod. It passes when the endpoint gate file
+# of the node agent does not exist and /readyz of the local API server answers.
+# The gate file has the same path in units/zz-podvm-endpoint-gate.conf.
+# The shell becomes curl, so a kill at the probe time limit leaves no process.
+[ -e /var/lib/nvke/control-plane-endpoint.gate ] && exit 1
+exec /usr/bin/curl --silent --fail --insecure --noproxy '*' --max-time 2 --output /dev/null https://127.0.0.1:6443/readyz

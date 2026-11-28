@@ -1,0 +1,15 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Start step of ovs-vswitchd.service: is the Open vSwitch datapath in the kernel?
+# A loaded module has /sys/module/openvswitch. A datapath that is built into the
+# kernel has its symbols in the kernel symbol table with no module name after
+# them. Else load the module, as the base image does.
+if [ -e /sys/module/openvswitch ]; then
+  exit 0
+fi
+if grep -q ' ovs_dp_process_packet$' /proc/kallsyms 2>/dev/null; then
+  exit 0
+fi
+exec modprobe openvswitch
