@@ -179,7 +179,7 @@ Run the commands of the README, section "4. Install Cluster API and the provider
 
 ### 11. Install CAPNICo and start the simulator
 
-**Ran in the first run of 2026-11-28, after one fix of the branch.** It took 1 min 43 s. The README of the tip `f36aeee8` calls `install-capnico.sh` by its path, and the script has no execute bit. Put `bash` in front of it until a later tip has the fix.
+**Ran in the first run of 2026-11-28, after one fix of the branch.** It took 1 min 43 s. The first try stopped, because the README called `install-capnico.sh` by its path and the script has no execute bit. The fix is in the public branch.
 
 Run the commands of the README, section "5. Install CAPNICo and start the simulator", from `$NVKE`. They get the CAPNICo source as a Go module, build CAPNICo from it and start the simulator.
 
@@ -189,13 +189,7 @@ Run the commands of the README, section "5. Install CAPNICo and start the simula
 
 ### 12. Install the management plane
 
-**Ran in the first run of 2026-11-28, after one fix of the branch.** It takes about 2 minutes. The README of the tip `f36aeee8` has no step for the image of the profiles, and the controller pod then waits in `Init:ImagePullBackOff`. Until a later tip has the fix, run this from `$NVKE` before the step, and load the image as in step 9:
-
-```bash
-docker build --tag docker.local/cwe-profiles:tilt controller/test/fixtures
-for n in $(kind get nodes --name podvm); do
-  docker save --platform linux/amd64 docker.local/cwe-profiles:tilt | docker exec -i "$n" ctr -n k8s.io images import --digests -; done
-```
+**Ran in the first run of 2026-11-28, after one fix of the branch.** It takes about 2 minutes. The first try stopped, because the README had no step for the image of the profiles fixture. The fix is in the public branch: steps 6 and 9 now build and load four images.
 
 Run the commands of the README, section "6. Install the management plane", from `$NVKE`.
 
