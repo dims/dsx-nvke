@@ -1,0 +1,17 @@
+# The node image for pods, form p11: the form p10 with ONE change. The image of the proxy
+# server (registry.k8s.io/kas-network-proxy/proxy-server:v0.34.0) is in the containerd store of
+# the image, from a file of the build context. A node of the lab cannot pull, and the static pod
+# of the Konnectivity prototype names that image.
+# The Docker of the second machine has the legacy builder only, so no RUN --mount here.
+ARG P10=nvke-node-podvm:bcc4376f-p10
+FROM ${P10}
+ARG KONN_IMAGE=registry.k8s.io/kas-network-proxy/proxy-server:v0.34.0
+ARG KONN_IMAGE2=registry.k8s.io/kas-network-proxy/proxy-agent:v0.34.0
+COPY import-images.sh /usr/local/lib/podvm/p3konn-import-images.sh
+# The archive stays in this layer. The next step imports it and removes the copy.
+COPY images/ /tmp/p3konn-images/
+RUN set -eu; \
+    sh /usr/local/lib/podvm/p3konn-import-images.sh "${KONN_IMAGE}" "${KONN_IMAGE2}"; \
+    rm /usr/local/lib/podvm/p3konn-import-images.sh; \
+    echo "p11" >/usr/share/podvm/image-form
+LABEL podvm.image-form="p11: p10 with the proxy server image and the proxy agent image of the Konnectivity prototype" p3konn.image="${KONN_IMAGE}" p3konn.image2="${KONN_IMAGE2}"

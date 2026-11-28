@@ -1,0 +1,96 @@
+# The proxy server of the Konnectivity prototype as a DaemonSet on the control plane nodes of the
+# NEW cluster (decision of 2026-11-28). The first form was a static pod that came as a bootstrap
+# file. NVKE runs "kubeadm reset" before each control plane join, and the reset empties the
+# manifest folder, so that static pod existed only on the first node.
+# The container, its flags, its user and its volumes are the ones of files/konnectivity-server.yaml.
+# The lab applies it after the cluster is up, like the agent DaemonSet (konn.sh server <run> apply).
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: konnectivity-server
+  namespace: kube-system
+  labels:
+    k8s-app: konnectivity-server
+spec:
+  selector:
+    matchLabels:
+      k8s-app: konnectivity-server
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        k8s-app: konnectivity-server
+        component: konnectivity-server
+        tier: control-plane
+    spec:
+      hostNetwork: true
+      dnsPolicy: Default
+      priorityClassName: system-node-critical
+      automountServiceAccountToken: false
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+      - operator: Exists
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: konnectivity-server
+        image: registry.k8s.io/kas-network-proxy/proxy-server:v0.34.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - /proxy-server
+        - --logtostderr=true
+        - --v=2
+        - --mode=grpc
+        - --uds-name=${KONN_SOCKET}
+        - --delete-existing-uds-file=true
+        - --server-port=0
+        - --agent-port=${KONN_AGENT_PORT}
+        - --health-port=8133
+        - --admin-port=8134
+        - --cluster-cert=/etc/kubernetes/pki/apiserver.crt
+        - --cluster-key=/etc/kubernetes/pki/apiserver.key
+        - --kubeconfig=/etc/kubernetes/admin.conf
+        - --agent-namespace=kube-system
+        - --agent-service-account=konnectivity-agent
+        - --authentication-audience=system:konnectivity-server
+        - --server-count=3
+        - --proxy-strategies=destHost,default
+        - --keepalive-time=60s
+        securityContext:
+          runAsUser: 0
+          runAsGroup: 0
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        livenessProbe:
+          httpGet:
+            scheme: HTTP
+            host: 127.0.0.1
+            port: 8133
+            path: /healthz
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 10
+        resources:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+        volumeMounts:
+        - name: kubernetes
+          mountPath: /etc/kubernetes
+          readOnly: true
+        - name: konnectivity-uds
+          mountPath: ${KONN_SOCKET_DIR}
+      volumes:
+      - name: kubernetes
+        hostPath:
+          path: /etc/kubernetes
+          type: Directory
+      - name: konnectivity-uds
+        hostPath:
+          path: ${KONN_SOCKET_DIR}
+          type: DirectoryOrCreate

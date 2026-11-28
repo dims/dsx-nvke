@@ -1,0 +1,87 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Lab prototype (phase 3, Konnectivity): the proxy server as a static pod of each control
+# plane node. The file comes with the bootstrap data of NVKE (controlPlaneConfig.infra.bootstrapFiles).
+# The kubelet starts it with the control plane of the node. It needs no scheduler.
+#   - the API server of this node talks to it over the Unix socket (gRPC, no certificate),
+#   - the agents of the workers dial port 8132 through the shared address,
+#   - it shows the agents the certificate of the API server, which has the shared address,
+#   - it checks the token of an agent with a TokenReview, through admin.conf (lab shortcut).
+# Image: the version that Kubernetes 1.36.4 names for it. It is in the containerd store of
+# the node image, so the node pulls nothing.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: konnectivity-server
+  namespace: kube-system
+  labels:
+    component: konnectivity-server
+    tier: control-plane
+spec:
+  hostNetwork: true
+  priorityClassName: system-node-critical
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+  - name: konnectivity-server
+    image: registry.k8s.io/kas-network-proxy/proxy-server:v0.34.0
+    imagePullPolicy: IfNotPresent
+    command:
+    - /proxy-server
+    - --logtostderr=true
+    - --v=2
+    - --mode=grpc
+    - --uds-name=/etc/kubernetes/policies/konnectivity/konnectivity-server.socket
+    - --delete-existing-uds-file=true
+    - --server-port=0
+    - --agent-port=8132
+    - --health-port=8133
+    - --admin-port=8134
+    - --cluster-cert=/etc/kubernetes/pki/apiserver.crt
+    - --cluster-key=/etc/kubernetes/pki/apiserver.key
+    - --kubeconfig=/etc/kubernetes/admin.conf
+    - --agent-namespace=kube-system
+    - --agent-service-account=konnectivity-agent
+    - --authentication-audience=system:konnectivity-server
+    - --server-count=3
+    - --proxy-strategies=destHost,default
+    - --keepalive-time=60s
+    securityContext:
+      # The image runs as user 65532. The key of the API server and admin.conf are files of
+      # root with mode 0600, and the API server (root) must connect to the socket.
+      runAsUser: 0
+      runAsGroup: 0
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+    livenessProbe:
+      httpGet:
+        scheme: HTTP
+        host: 127.0.0.1
+        port: 8133
+        path: /healthz
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 10
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+    volumeMounts:
+    - name: kubernetes
+      mountPath: /etc/kubernetes
+      readOnly: true
+    - name: konnectivity-uds
+      mountPath: /etc/kubernetes/policies/konnectivity
+  volumes:
+  - name: kubernetes
+    hostPath:
+      path: /etc/kubernetes
+      type: Directory
+  - name: konnectivity-uds
+    hostPath:
+      path: /etc/kubernetes/policies/konnectivity
+      type: DirectoryOrCreate

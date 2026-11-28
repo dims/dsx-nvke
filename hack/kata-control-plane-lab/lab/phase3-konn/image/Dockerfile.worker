@@ -1,0 +1,14 @@
+# The worker image of the simulator, form w2: the form w1 with ONE change. The image of the
+# proxy agent (registry.k8s.io/kas-network-proxy/proxy-agent:v0.34.0) is in the containerd store
+# of the image, from a file of the build context. The agent DaemonSet of the Konnectivity
+# prototype names that image, and a worker of the lab cannot pull.
+ARG W1=nvke-node-nico:bcc4376f-w1
+FROM ${W1}
+ARG KONN_IMAGE=registry.k8s.io/kas-network-proxy/proxy-agent:v0.34.0
+COPY import-images.sh /usr/local/lib/p3/p3konn-import-images.sh
+COPY images/ /tmp/p3konn-images/
+RUN set -eu; \
+    sh /usr/local/lib/p3/p3konn-import-images.sh "${KONN_IMAGE}"; \
+    rm /usr/local/lib/p3/p3konn-import-images.sh; \
+    echo "w2" >/usr/local/lib/p3/image-form
+LABEL p3.image-form="w2: w1 with the proxy agent image of the Konnectivity prototype" p3konn.image="${KONN_IMAGE}"

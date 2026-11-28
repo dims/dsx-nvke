@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Lab prototype (phase 3, Konnectivity). The API server reads this file once, at its start
+# (--egress-selector-config-file). The calls of the kind "cluster" go to the proxy server of
+# this node over a Unix socket: each call to a kubelet, to a pod, to a Service and to a node
+# port. The calls of the kinds "controlplane" and "etcd" stay direct.
+# The form is the one of Kubernetes 1.36.4, cluster/gce/gci/configure-helper.sh.
+# The socket is in a folder below /etc/kubernetes/policies, because NVKE mounts that folder
+# into the API server (read only). The request has no field for a volume.
+apiVersion: apiserver.k8s.io/v1beta1
+kind: EgressSelectorConfiguration
+egressSelections:
+- name: cluster
+  connection:
+    proxyProtocol: GRPC
+    transport:
+      uds:
+        udsName: /etc/kubernetes/policies/konnectivity/konnectivity-server.socket
+- name: controlplane
+  connection:
+    proxyProtocol: Direct
+- name: etcd
+  connection:
+    proxyProtocol: Direct

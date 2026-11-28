@@ -1,0 +1,129 @@
+{
+  "name": "kata-cp1",
+  "controlPlaneKubernetesVersion": "1.36.4",
+  "cniPlugin": "ovn-kubernetes",
+  "cniVersion": "2.4.2",
+  "etcdEncrypted": false,
+  "enableCPNodeRecycling": true,
+  "controlPlaneEndpoint": "172.29.255.220:6443",
+  "network": {
+    "podCIDR": "10.113.0.0/16",
+    "serviceCIDR": "10.112.0.0/16"
+  },
+  "controlPlaneConfig": {
+    "desiredCount": 3,
+    "maxSurge": 1,
+    "systemReservedMemory": "512Mi",
+    "infra": {
+      "machineTemplate": {
+        "apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha1",
+        "kind": "PodVMMachineTemplate",
+        "spec": {
+          "template": {
+            "spec": {
+              "image": "docker.io/library/nvke-node-podvm:bcc4376f-p11",
+              "imagePullPolicy": "Never",
+              "resources": {
+                "cpu": "2",
+                "memory": "6Gi"
+              },
+              "volumes": {
+                "var": {
+                  "storageClassName": "podvm-local-block",
+                  "size": "20Gi"
+                },
+                "etcd": {
+                  "storageClassName": "podvm-local-block",
+                  "size": "8Gi"
+                }
+              }
+            }
+          }
+        }
+      },
+      "bootstrapFiles": [
+        {
+          "path": "/etc/kubernetes/policies/egress-selector-configuration.yaml",
+          "owner": "root:root",
+          "permissions": "0644",
+          "content": "# Lab prototype (phase 3, Konnectivity). The API server reads this file once, at its start\n# (--egress-selector-config-file). The calls of the kind \"cluster\" go to the proxy server of\n# this node over a Unix socket: each call to a kubelet, to a pod, to a Service and to a node\n# port. The calls of the kinds \"controlplane\" and \"etcd\" stay direct.\n# The form is the one of Kubernetes 1.36.4, cluster/gce/gci/configure-helper.sh.\n# The socket is in a folder below /etc/kubernetes/policies, because NVKE mounts that folder\n# into the API server (read only). The request has no field for a volume.\napiVersion: apiserver.k8s.io/v1beta1\nkind: EgressSelectorConfiguration\negressSelections:\n- name: cluster\n  connection:\n    proxyProtocol: GRPC\n    transport:\n      uds:\n        udsName: /etc/kubernetes/policies/konnectivity/konnectivity-server.socket\n- name: controlplane\n  connection:\n    proxyProtocol: Direct\n- name: etcd\n  connection:\n    proxyProtocol: Direct\n"
+        },
+        {
+          "path": "/etc/kubernetes/manifests/konnectivity-server.yaml",
+          "owner": "root:root",
+          "permissions": "0600",
+          "content": "# Lab prototype (phase 3, Konnectivity): the proxy server as a static pod of each control\n# plane node. The file comes with the bootstrap data of NVKE (controlPlaneConfig.infra.bootstrapFiles).\n# The kubelet starts it with the control plane of the node. It needs no scheduler.\n#   - the API server of this node talks to it over the Unix socket (gRPC, no certificate),\n#   - the agents of the workers dial port 8132 through the shared address,\n#   - it shows the agents the certificate of the API server, which has the shared address,\n#   - it checks the token of an agent with a TokenReview, through admin.conf (lab shortcut).\n# Image: the version that Kubernetes 1.36.4 names for it. It is in the containerd store of\n# the node image, so the node pulls nothing.\napiVersion: v1\nkind: Pod\nmetadata:\n  name: konnectivity-server\n  namespace: kube-system\n  labels:\n    component: konnectivity-server\n    tier: control-plane\nspec:\n  hostNetwork: true\n  priorityClassName: system-node-critical\n  securityContext:\n    seccompProfile:\n      type: RuntimeDefault\n  containers:\n  - name: konnectivity-server\n    image: registry.k8s.io/kas-network-proxy/proxy-server:v0.34.0\n    imagePullPolicy: IfNotPresent\n    command:\n    - /proxy-server\n    - --logtostderr=true\n    - --v=2\n    - --mode=grpc\n    - --uds-name=/etc/kubernetes/policies/konnectivity/konnectivity-server.socket\n    - --delete-existing-uds-file=true\n    - --server-port=0\n    - --agent-port=8132\n    - --health-port=8133\n    - --admin-port=8134\n    - --cluster-cert=/etc/kubernetes/pki/apiserver.crt\n    - --cluster-key=/etc/kubernetes/pki/apiserver.key\n    - --kubeconfig=/etc/kubernetes/admin.conf\n    - --agent-namespace=kube-system\n    - --agent-service-account=konnectivity-agent\n    - --authentication-audience=system:konnectivity-server\n    - --server-count=3\n    - --proxy-strategies=destHost,default\n    - --keepalive-time=60s\n    securityContext:\n      # The image runs as user 65532. The key of the API server and admin.conf are files of\n      # root with mode 0600, and the API server (root) must connect to the socket.\n      runAsUser: 0\n      runAsGroup: 0\n      allowPrivilegeEscalation: false\n      capabilities:\n        drop:\n        - ALL\n    livenessProbe:\n      httpGet:\n        scheme: HTTP\n        host: 127.0.0.1\n        port: 8133\n        path: /healthz\n      initialDelaySeconds: 10\n      periodSeconds: 10\n      timeoutSeconds: 10\n    resources:\n      requests:\n        cpu: 25m\n        memory: 32Mi\n    volumeMounts:\n    - name: kubernetes\n      mountPath: /etc/kubernetes\n      readOnly: true\n    - name: konnectivity-uds\n      mountPath: /etc/kubernetes/policies/konnectivity\n  volumes:\n  - name: kubernetes\n    hostPath:\n      path: /etc/kubernetes\n      type: Directory\n  - name: konnectivity-uds\n    hostPath:\n      path: /etc/kubernetes/policies/konnectivity\n      type: DirectoryOrCreate\n"
+        }
+      ]
+    },
+    "apiServer": {
+      "extraArgs": {
+        "egress-selector-config-file": "/etc/kubernetes/policies/egress-selector-configuration.yaml"
+      }
+    }
+  },
+  "infra": {
+    "cluster": {
+      "apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha1",
+      "kind": "PodVMCluster",
+      "metadata": {
+        "name": "kata-cp1"
+      },
+      "spec": {
+        "podNamespace": "d",
+        "runtimeClassName": "kata-clh-runtime-rs-fix-direct-ovs",
+        "networkAttachment": {
+          "name": "nodenet",
+          "namespace": "d"
+        },
+        "addressRange": {
+          "cidr": "172.28.1.0/24",
+          "prefixLength": 16
+        },
+        "failureDomainLabelKey": "topology.kubernetes.io/zone"
+      }
+    }
+  },
+  "nodePools": [
+    {
+      "name": "nico-workers",
+      "nodeNamePrefix": "nw",
+      "controlPlane": false,
+      "desiredNodeCount": 2,
+      "systemReservedMemory": "512Mi",
+      "infra": {
+        "machineTemplate": {
+          "apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha1",
+          "kind": "NicoMachineTemplate",
+          "metadata": {
+            "name": "kata-cp1-nico-workers-template"
+          },
+          "spec": {
+            "template": {
+              "spec": {
+                "siteID": "00000000-0000-0000-0000-000000000001",
+                "vpcID": "00000000-0000-0000-0000-000000000002",
+                "instanceTypeID": "00000000-0000-0000-0000-000000000005",
+                "cloudInitInjectHostname": true,
+                "ipxeScript": "#!ipxe\necho local-nico-worker\n",
+                "sshKeyGroupIDs": [
+                  "00000000-0000-0000-0000-000000000004"
+                ],
+                "interfaces": [
+                  {
+                    "subnetID": "00000000-0000-0000-0000-000000000003"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "preKubeadmCommands": [
+          "n=0; until [ -S /run/systemd/private ] || [ $n -ge 600 ]; do n=$((n+1)); sleep 0.2; done; echo \"lab wait for systemd: $n steps of 0.2 s\"; [ -S /run/systemd/private ]",
+          "mkdir -p /run/cluster-api",
+          "echo success > /run/cluster-api/bootstrap-success.complete"
+        ]
+      }
+    }
+  ]
+}

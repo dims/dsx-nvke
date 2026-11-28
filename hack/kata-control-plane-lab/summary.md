@@ -50,6 +50,7 @@ Phase 0 tested one node in a virtual machine of Kata Containers 4.4.0. In phase 
 | 3 | Traffic between the two kinds of node | Pod traffic passed on 20 of 20 lines. Each of the three API servers reached each worker for logs, exec and port forward, with no proxy. | `results/phase3-results.md` |
 | 3 | Workers through NVKE | NVKE added a worker in 57 s and refilled a deleted worker in 68 s. A reboot of a worker took 61 s with one NVKE setting. A delete of the cluster left nothing. | `results/phase3-results.md` |
 | 3 | Control plane flows with the workers present | A rollout and a forced certificate renewal passed with 701 of 701 and 627 of 627 calls answered, and no worker was disturbed. | `results/phase3-results.md` |
+| 3 | A Konnectivity prototype, for workers that the control plane cannot reach | Konnectivity is the upstream proxy for the calls of the API server to the nodes. With it, logs, exec and port forward passed on 18 of 18 calls. The pod network between the workers and the control plane stayed broken. So this design needs a routed network between the two, and then it needs no Konnectivity. | `results/phase3-results.md`, section 4 |
 
 ## Findings in NVKE that apply with or without Kata pods
 

@@ -1,6 +1,6 @@
 # Phase 3 results: a control plane in pods with workers on the mock NICo
 
-State on 2026-11-27 at 20:19: pass rules 1 to 6 of `phase3-design.md` pass in the lab. The fix of the simulator passes its lab run with 8 of 8 worker starts. Pass rule 7, the Konnectivity decision, has its facts for the direct path. Davanum accepted a prototype in the lab alone (`phase3-konnectivity-design.md`), and its preparation is in work (section 6).
+State on 2026-11-27 at 22:06: pass rules 1 to 7 of `phase3-design.md` have a result in the lab, and 1 to 6 pass. The fix of the simulator passes its lab run with 8 of 8 worker starts. The Konnectivity prototype in the lab passes its four pass rules, and the decision of pass rule 7 is in section 4.
 
 Design: `phase3-design.md`. Lab result with the numbers and the evidence: `lab/phase3-run/result.md` and `lab/phase3-run/result-AB.md`. Source readings: `results/phase3-source-reading-nvke.md` and `results/phase3-source-reading-nico-sim.md`. All tests ran on the second machine with nested virtualization. "Deduction" marks what no test has shown.
 
@@ -20,7 +20,7 @@ The mock stands in for bare metal GPU machines. Section 8 says what it cannot sh
 | 4. NVKE adds a worker and removes a worker, and the container of a removed worker is gone | Pass. A new worker is a good node after 57 s. After a node delete nothing of the worker is left, two times. With the pool count unchanged NVKE refills by itself in 68 s | `lab/phase3-run/result.md` |
 | 5. With the workers present, a rollout of the control plane and a forced certificate renewal pass | Pass. Rollout: 695 s, 701 of 701 calls with 200. Renewal: 10 min 16 s, 627 of 627. No worker left Ready, and the kubelets of the workers had no lease error | The same |
 | 6. A delete of the cluster leaves nothing | Pass. The row is gone after 57.8 s. No pod, claim, Machine, object of either provider, instance of the mock, worker container or SPIRE entry | The same |
-| 7. The Konnectivity decision is written | Open. The facts of the direct path are in section 4. A prototype design follows | Section 4 |
+| 7. The Konnectivity decision is written | Done. Not needed for the design of phase 3, and not enough by itself for workers that the control plane cannot reach. A lab prototype shows what it repairs and what stays broken | Section 4, `lab/phase3-konn/result.md` |
 
 The reboot of a worker through NVKE, which the design named as a try:
 
@@ -77,7 +77,31 @@ The lab cluster has no Konnectivity. Each connection is direct:
 - With two networks the kubelet of a worker sees the real node address of the control plane node as the caller. With one network it sees the address of a kind host node, so the call still arrives, through the host.
 - NVKE has no code, no setting and no doc for Konnectivity.
 - So a routed network with no address translation between the node addresses of the control plane pods and of the workers needs no Konnectivity. This is now a lab fact for logs, exec, port forward, pod proxy and Service proxy.
-- Not tested: a worker that the control plane pods cannot reach on its node address. That is the case for Konnectivity. Davanum chose a prototype for it, with a short design first.
+- A worker that the control plane pods cannot reach on its node address is the case for Konnectivity. Davanum chose a prototype for it in the lab alone, with no NVKE code (`phase3-konnectivity-design.md`).
+
+### The prototype
+
+The form: the request carries the API server flag `--egress-selector-config-file` and the config file, the proxy server runs on each control plane node, an agent runs on the nodes, and the lab Service of the shared address has one more port. The images are the upstream ones at v0.34.0, the version that Kubernetes 1.36.4 names. A NetworkPolicy in the host cluster makes the workers unreachable from the control plane pods (0 of 6 connections with it, 6 of 6 without it), and the NVKE controller keeps its path to the node agents.
+
+| Pass rule of the prototype | Result |
+|---|---|
+| 1. With the policy and no proxy, logs, exec and port forward to a pod on a worker fail | Pass. 18 of 18 calls fail through the three API servers, with a timeout on the kubelet port. NVKE still shows five good nodes |
+| 2. With the proxy, the same calls pass through each API server | Pass. 18 of 18. The kubelet of each worker sees only its own node address as the caller. Each worker agent has three tunnels through the one shared address |
+| 3. A control plane node that NVKE replaces uses the proxy | Pass, with a fourth node and with a replaced first node. 24 of 24 calls. The two nodes that stayed had 119 of 119 good calls each |
+| 4. The list of what still fails | 27 lines, each as the design expects. Pod traffic between a worker and the control plane nodes fails in both directions, the API Service and name lookup fail from a pod on a worker, and NVKE shows five good nodes |
+
+What the prototype found:
+
+- **A static pod from the request does not stay.** The NVKE controller runs `kubeadm reset` before each control plane join (`cleanBeforeControlPlaneRejoin`, `controller/internal/temporal/workflows/provision_node.go`), and the reset empties the manifest folder. Only the first node kept its proxy server, and 12 of 18 calls failed through the two joined nodes with a missing socket. The request has no command hook after the join. The lab then ran the proxy server as a DaemonSet on the control plane nodes, which it applied after the cluster was up.
+- **An API server with the flag and no proxy server reports ready.** `/readyz` is 200, so the shared address sends calls to it. A new control plane node was in that state for 38 to 50 s, and a `logs` call through it failed in that time.
+- **The agents find a new proxy server by themselves**, and the shared address spreads their tunnels over the proxy servers.
+- **A call to a pod address goes to any agent.** With agents on each node, a call of an API server to a pod on a worker passed 14 of 48 times, because an agent on a control plane node cannot reach that pod. With agents on the workers only, those calls passed 72 of 72 times, and each call for a control plane node failed.
+
+### The decision
+
+- **Phase 3 needs no Konnectivity.** In the tested form each control plane pod is a full node of the cluster, so the pod network already needs a routed path with no address translation between the control plane nodes and the workers. With that path the API server reaches the workers directly.
+- **Konnectivity is not enough for workers that the control plane cannot reach.** It carries the calls of the API server to a kubelet. The pod network, the API Service for pods and name lookup stay broken, and a call to a pod works only as far as the pod network of the agent's node reaches.
+- **It becomes a real need in phase 4**, where the pod has no kubelet and the control plane is not a node of the cluster. For that, NVKE has to install the proxy server after the join or as a pod of the cluster, has to hold a new API server out of the shared address until its proxy server has agents, and has to keep the flag in the `kubeadm-config` ConfigMap through each flow that rewrites it.
 
 ## 5. Findings
 
@@ -110,11 +134,10 @@ Side points for the repository, with no effect on a result:
 16. The simulator lanes of CI build the NICo provider v0.1.0 from source, and a comment in `controller/deploy/capnico-e2e/nvke-deploy.yaml` says that its image is private. One pull with no login passed.
 17. In two of five cluster creates one `JoinNode` workflow of a control plane node failed at once and passed in the run that NVKE started by itself ("failed to get etcd mirror Pod for node ... not found" in one, a failed `kubeadm join` in the other). It is the join of a control plane pod, not the worker path. The cause is not looked for.
 
-## 6. In work
+## 6. Done after the first form of this note
 
-- The Konnectivity prototype in the lab alone, with no NVKE code (`phase3-konnectivity-design.md`, accepted by Davanum on 2026-11-27). The artifacts are in preparation. The test has four pass rules.
-
-Done since the first form of this note: the lab run with the fixed simulator and with no wait in the request (finding 3). The mixed cluster of that run had 5 good nodes after 5 min 36 s, and each of six refills gave a good node 68 s after the node delete.
+- The lab run with the fixed simulator and with no wait in the request (finding 3). The mixed cluster of that run had 5 good nodes after 5 min 36 s, and each of six refills gave a good node 68 s after the node delete.
+- The Konnectivity prototype in the lab and the decision (section 4).
 
 ## 7. What the lab does in the place of a product part
 
@@ -128,7 +151,7 @@ Done since the first form of this note: the lab run with the fixed simulator and
 
 - A real NICo, real GPU machines, DPUs, a real network with BGP, the boot time of a machine, and a TPM identity. The mock has none of them.
 - The virtual machine form of the mock.
-- A worker that the control plane pods cannot reach, and Konnectivity.
+- Konnectivity as a part of NVKE. The prototype is lab manifests and a request. Not tested with it: webhooks and metrics through the proxy, a guarded operation, an upgrade, and the proxy after a certificate renewal.
 - An upgrade of the Kubernetes version with workers of two kinds, etcd encryption with mock workers, and a worker pool with more than three nodes.
 - The reboot with the default setting to its end after 30 minutes.
 - The NICo controllers of NVKE turned on, and Teleport.
@@ -148,6 +171,6 @@ Davanum allowed each point on 2026-11-27. `lab/phase3-run/result.md` has the rem
 
 ## 10. What comes next
 
-1. The Konnectivity prototype test, and the decision in this note.
+1. Phase 3 of the lab is done with this note. Phase 4 of the plan (a pod with no kubelet) is optional by the plan and has no word of Davanum.
 3. For Davanum: the new branch `fix/nico-sim-wait-for-systemd` joins the list of pull requests that he can open. It stands alone.
 4. For a product: the decision between the request forms of section 7, the attestation method for each pool, and a test with real hardware for the OVN settings.

@@ -1,0 +1,26 @@
+# Lab prototype (phase 3, Konnectivity): the NetworkPolicy of the design, for the HOST cluster,
+# in the namespace of the control plane pods. It stops each NEW connection from a control plane
+# pod to an address of the workers. It selects no other pod, so the NVKE controller keeps its
+# way to port 15005 of a worker. An answer to a connection that a worker opened passes.
+# The network plugin of the host cluster (kindnet) makes rules for it inside the kind node
+# containers. Nothing changes in the network namespace of the machine.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: p3-konn-no-way-to-workers
+  namespace: ${NS}
+  labels:
+    lab: p3-konn
+spec:
+  podSelector:
+    matchExpressions:
+    - key: cluster.x-k8s.io/control-plane
+      operator: Exists
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - ${WORKER_BLOCK}
