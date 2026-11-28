@@ -2,7 +2,7 @@
 
 State of 2026-11-28. The guide uses two public branches:
 
-- `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `8bc32175`
+- `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `8c957317`
 - `integration/control-plane-kata-pods` of `https://github.com/dims/kata-containers`, at `96a8d905b`
 
 **Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Each of the ten scenarios passed. Scenario 6 passed at its second try, on a cluster that was made again: "Known obstacles" has why. A mark on each step and each scenario says how it ran. Expect to find faults, and tell us where.
@@ -34,7 +34,7 @@ State of 2026-11-28. A first run is in work, on one arm64 machine with `/dev/kvm
 - On arm64 `up.sh` also gives each kind node a larger `/dev/shm`. QEMU keeps the memory of a guest there, and a container has 64 MB of it.
 - Each mark, each time and each number of this guide is from amd64.
 - Steps that passed on arm64: 1 to 13, each as it is written here, on 2026-11-28. The guest kernel of step 3 has the same file name there. Step 4 took 11 minutes, and the base image of step 5 has 1.1 GB. The pod of step 8 runs on QEMU and prints the same kernel version.
-- Scenarios that passed on arm64: 1, 2, 3, 4 and 5, on 2026-11-28. The status was `Provisioned` after 2 minutes and 26 seconds, and each of the four nodes was Ready after 3 minutes and 47 seconds. In scenario 3 the node was Ready again after 55 seconds. The rollout of scenario 5 took 8 minutes and 46 seconds, with no failed call. The other scenarios did not run there yet.
+- Scenarios that passed on arm64: 1, 2, 3, 4, 5 and 6, on 2026-11-28. The status was `Provisioned` after 2 minutes and 26 seconds, and each of the four nodes was Ready after 3 minutes and 47 seconds. In scenario 3 the node was Ready again after 55 seconds. The rollout of scenario 5 took 8 minutes and 46 seconds, with no failed call. In scenario 6 the change took 6 minutes and 54 seconds and the rollout after it 7 minutes and 43 seconds, with no failed call. The other scenarios did not run there yet.
 
 ## The marks
 
