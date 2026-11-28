@@ -249,7 +249,9 @@ customRuntimes:
 ```
 
 `spec.runtimeClassName` of the `PodVMCluster` is then `kata-podvm`. The two
-file paths are examples. The reasons for the settings:
+file paths are examples. On arm64 the base configuration is `qemu-runtime-rs`
+and the section is `[hypervisor.qemu]`, with the same three settings. A custom
+runtime of this form is tested on both. The reasons for the settings:
 
 - **`overhead`.** The hypervisor runs in the cgroup of the pod, and its own
   memory counts there. The chart default for this runtime is 130Mi. With too
@@ -282,11 +284,9 @@ two changes for that. Neither is in a release of Kata Containers.
 
 ## What is not covered
 
-- No test runs the image in a pod. The checks are the image build, the unit
+- No automated test runs the image in a pod. The automated checks are the unit
   tests of `podvm-bootstrap` and the test of `format-if-empty`.
 - No workflow builds or publishes the image.
-- The chart values for the Kata handler follow the chart of Kata Containers
-  4.4.0. No test installs Kata with them.
 - The image carries no kernel config file. The kubeadm wrapper of the base
   image ignores the `SystemVerification` check, which reads that file.
 - The image adds no container image to those of the base image. A node pulls
@@ -300,4 +300,5 @@ two changes for that. Neither is in a release of Kata Containers.
 - The join token of a node works one time. A node that is down for longer than
   the life of its SPIRE identity cannot get a new identity.
 - The entry point needs both volume devices, also for a worker.
-- Not tested: arm64, IPv6, another hypervisor, and a runtime that is not Kata.
+- Not tested: IPv6, a hypervisor other than the two above, and a runtime that
+  is not Kata.
