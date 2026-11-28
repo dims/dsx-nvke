@@ -146,10 +146,11 @@ Service when its API server stops and not before.
 
 ## What the host cluster and Kata must give
 
-The parts of the image were tested with Kata Containers 4.4.0, Cloud Hypervisor
-and the Rust runtime (the configuration `clh-runtime-rs`), on amd64. The names
-below are those of that release. The provider README lists the other needs of
-the host cluster.
+The image is tested with Kata Containers 4.4.0 and its Rust runtime: on amd64
+with Cloud Hypervisor (the configuration `clh-runtime-rs`), and on arm64 with
+QEMU (the configuration `qemu-runtime-rs`). That release has `clh-runtime-rs`
+for amd64 only. The names below are those of that release. The provider README
+lists the other needs of the host cluster.
 
 ### The guest kernel
 
@@ -176,8 +177,10 @@ build build
 DESTDIR="$PWD/out" PREFIX=/opt/kata build install
 ```
 
-The version, the URL and the options `-x -m` are those of the release kernel
-for x86_64, so the kernel differs from the stock kernel only by the two files.
+The version, the URL and the options `-x -m` are those of the release kernel,
+for x86_64 and for aarch64, so the kernel differs from the stock kernel only by
+the two files. `-a` names the architecture of the machine. The build is tested
+on x86_64 and on aarch64.
 The build host needs `yq`, `flex`, `bison` and the headers of `libelf`.
 `tools/packaging/static-build/kernel/Dockerfile` of Kata has the full package
 list. The result is `out/opt/kata/share/kata-containers/vmlinux-6.18.62-211`.
