@@ -16,7 +16,8 @@ the volumes and the address on demand, and it deletes them with the machine.
 | `api/v1alpha1/` | The three kinds, their deepcopy functions, and the provider ID format |
 | `controllers/` | The cluster and machine reconcilers |
 | `cmd/manager/` | The standalone controller-manager binary |
-| `config/` | CRDs, RBAC, the controller Deployment, and sample objects |
+| `config/` | CRDs, RBAC, and the controller Deployment |
+| `config/samples/` | Sample objects and a sample cluster request, with example values |
 | `Dockerfile` | The standalone provider image |
 
 The provider imports nothing from the NVKE controller. It reads only the
@@ -371,7 +372,8 @@ limit of 5 seconds, because the controller reconciles one machine at a time.
 
 ## Use with the NVKE controller
 
-The NVKE controller takes the two objects on its `infra` path:
+The NVKE controller takes the two objects on its `infra` path. The shape of the
+request:
 
 ```json
 {
@@ -401,6 +403,22 @@ The NVKE controller takes the two objects on its `infra` path:
 
 The controller chart grants the NVKE controller the rights for the three kinds
 and their CRDs with the values `capi.rbac.create` and `capi.rbac.podvm`.
+
+### Samples
+
+`config/samples/` has a complete set with example values. Each value is a
+placeholder for a value of your site.
+
+| File | Content |
+|---|---|
+| [`podvmcluster.yaml`](config/samples/podvmcluster.yaml) | A `PodVMCluster` with a control plane Service |
+| [`podvmmachinetemplate.yaml`](config/samples/podvmmachinetemplate.yaml) | A `PodVMMachineTemplate` for control plane machines |
+| [`networkattachmentdefinition.yaml`](config/samples/networkattachmentdefinition.yaml) | A NetworkAttachmentDefinition that takes the address and the hardware address from the pod annotation |
+| [`storageclass.yaml`](config/samples/storageclass.yaml) | A storage class for block volumes that binds at the first use |
+| [`nvke-cluster-request.json`](config/samples/nvke-cluster-request.json) | An NVKE cluster request that carries the two objects |
+
+A test checks each object of the provider against the schema of its generated
+CRD, and that the five files name each other.
 
 ## Install
 

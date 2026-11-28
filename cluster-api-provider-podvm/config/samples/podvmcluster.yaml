@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# A PodVMCluster with a control plane Service that the provider makes.
+#
+# Every value is an example. The node network of this sample is
+# 198.51.100.0/24, and the provider gives the pods the addresses of
+# 198.51.100.64/26. The load balancer gives the Service the fixed address
+# 203.0.113.10, which is the controlPlaneEndpoint of nvke-cluster-request.json.
+#
+# With the NVKE controller, send the spec as infra.cluster of the cluster
+# request. The NVKE controller sets the name and the namespace itself.
+apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+kind: PodVMCluster
+metadata:
+  name: example
+  namespace: nvke-system
+spec:
+  # The namespace must exist before the cluster request, and it must allow
+  # privileged pods.
+  podNamespace: example-pods
+  runtimeClassName: kata
+  networkAttachment:
+    name: nodenet
+  addressRange:
+    cidr: 198.51.100.64/26
+    prefixLength: 24
+  failureDomainLabelKey: topology.kubernetes.io/zone
+  controlPlaneService:
+    # The annotation of the load balancer that asks for a fixed address. This
+    # one is the annotation of MetalLB. Another load balancer has its own.
+    annotations:
+      metallb.io/loadBalancerIPs: 203.0.113.10

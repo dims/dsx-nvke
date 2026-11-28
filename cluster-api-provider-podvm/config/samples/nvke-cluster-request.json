@@ -1,0 +1,49 @@
+{
+  "name": "example",
+  "controlPlaneKubernetesVersion": "1.36.3",
+  "cniPlugin": "ovn-kubernetes",
+  "cniVersion": "2.4.2",
+  "etcdEncrypted": true,
+  "controlPlaneEndpoint": "203.0.113.10:6443",
+  "network": {
+    "podCIDR": "192.168.0.0/16",
+    "serviceCIDR": "10.96.0.0/12"
+  },
+  "controlPlaneConfig": {
+    "desiredCount": 3,
+    "infra": {
+      "machineTemplate": {
+        "apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha1",
+        "kind": "PodVMMachineTemplate",
+        "spec": {
+          "template": {
+            "spec": {
+              "image": "registry.example.com/nvke/podvm-node:1.36.3",
+              "resources": {"cpu": "4", "memory": "8Gi"},
+              "volumes": {
+                "var": {"storageClassName": "block-storage", "size": "40Gi"},
+                "etcd": {"storageClassName": "block-storage", "size": "10Gi"}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "infra": {
+    "cluster": {
+      "apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha1",
+      "kind": "PodVMCluster",
+      "spec": {
+        "podNamespace": "example-pods",
+        "runtimeClassName": "kata",
+        "networkAttachment": {"name": "nodenet"},
+        "addressRange": {"cidr": "198.51.100.64/26", "prefixLength": 24},
+        "failureDomainLabelKey": "topology.kubernetes.io/zone",
+        "controlPlaneService": {
+          "annotations": {"metallb.io/loadBalancerIPs": "203.0.113.10"}
+        }
+      }
+    }
+  }
+}
