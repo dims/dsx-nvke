@@ -26,6 +26,11 @@ const (
 	stepOpeningEndpointGate                     = "opening_endpoint_gate"
 )
 
+// kubeadmUpgradeApplyGateOwner is what KubeadmUpgradeApply writes into the gate
+// file. The RPC parks no manifest, so it has no park directory to name. The name
+// only says who opens the gate: the agent, as for defaultEtcdDefragParkDir.
+const kubeadmUpgradeApplyGateOwner = "kubeadm-upgrade-apply"
+
 // ControlPlaneEndpointGate configures the health gate that takes this node out
 // of a control-plane load balancer the node does not run. The gate is a file,
 // and the load balancer's health check has to fail for this node while the file
@@ -112,17 +117,21 @@ func (s *NodeAgentServer) withdrawThroughControlPlaneEndpointGate(
 // defragmentation finishes. A caller does take over a gate the defragmentation
 // left closed, because the caller's hold is the stronger one.
 //
+// KubeadmUpgradeApply parks nothing and passes kubeadmUpgradeApplyGateOwner. It
+// is held to the rule of the defragmentation: see
+// agentOpensControlPlaneEndpointGate.
+//
 // The file is staged and renamed into place. The health check only asks whether
 // the file exists, so a write that failed halfway would leave a closed gate
 // with no owner, which nothing but a caller would open.
 func (s *NodeAgentServer) closeControlPlaneEndpointGate(parkDir string) (bool, error) {
 	path := s.rootedPath(s.ControlPlaneEndpointGate.File)
-	if parkDir == defaultEtcdDefragParkDir {
+	if agentOpensControlPlaneEndpointGate(parkDir) {
 		owner, closed, err := readControlPlaneEndpointGate(path)
 		if err != nil {
 			return false, err
 		}
-		if closed && owner != parkDir {
+		if closed && !agentOpensControlPlaneEndpointGate(owner) {
 			slog.Info("control plane endpoint gate is already closed and a caller owns it; leaving it as it is",
 				"gateFile", path, "owner", owner)
 			return false, nil
@@ -147,9 +156,9 @@ func (s *NodeAgentServer) closeControlPlaneEndpointGate(parkDir string) (bool, e
 // staticPodMutationMu. It does not wait for the load balancer, which takes the
 // node back once its health check also finds the local apiserver ready.
 //
-// With defaultEtcdDefragParkDir it opens only a gate that the defragmentation
-// closed. A caller's restore opens the gate whoever closed it. No gate
-// configured and a gate that is already open are both success.
+// With an owner that agentOpensControlPlaneEndpointGate accepts, it opens only a
+// gate that such a flow closed. A caller's restore opens the gate whoever closed
+// it. No gate configured and a gate that is already open are both success.
 func (s *NodeAgentServer) openControlPlaneEndpointGate(progress nodeAgentOperationProgress, parkDir string) error {
 	if s.ControlPlaneEndpointGate.File == "" {
 		return nil
@@ -162,7 +171,7 @@ func (s *NodeAgentServer) openControlPlaneEndpointGate(progress nodeAgentOperati
 	if !closed {
 		return nil
 	}
-	if parkDir == defaultEtcdDefragParkDir && owner != parkDir {
+	if agentOpensControlPlaneEndpointGate(parkDir) && !agentOpensControlPlaneEndpointGate(owner) {
 		slog.Info("control plane endpoint gate is closed and a caller owns it; leaving it closed",
 			"gateFile", path, "owner", owner)
 		return nil
@@ -200,9 +209,41 @@ func (s *NodeAgentServer) handOffControlPlaneEndpointGateToCaller() error {
 	return nil
 }
 
+// agentOpensControlPlaneEndpointGate reports whether owner names a flow that
+// closes the gate and opens it again in one call: the etcd defragmentation and
+// KubeadmUpgradeApply. The agent owes the open of such a gate, at the end of the
+// flow or at its next start. Any other owner is a caller.
+//
+// Each of these flows holds staticPodMutationMu from the close to the open. So
+// a gate of this kind that one of them finds closed is what an interrupted flow
+// left behind, and it takes that gate over.
+func agentOpensControlPlaneEndpointGate(owner string) bool {
+	return owner == defaultEtcdDefragParkDir || owner == kubeadmUpgradeApplyGateOwner
+}
+
+// etcdHasAnotherVotingMember reports whether etcd has a voting member besides
+// the local one. With the stacked etcd of kubeadm that is another control plane
+// node, and so another node behind the load balancer. The agent cannot see the
+// load balancer, and this is the nearest thing to it that it can read.
+func (s *NodeAgentServer) etcdHasAnotherVotingMember(ctx context.Context) (bool, error) {
+	client, err := s.newEtcdMemberClient()
+	if err != nil {
+		return false, fmt.Errorf("connect to local kubeadm etcd: %w", err)
+	}
+	defer client.Close()
+
+	listCtx, cancel := s.etcdCallContext(ctx)
+	defer cancel()
+	members, err := client.MemberList(listCtx)
+	if err != nil {
+		return false, fmt.Errorf("list etcd members: %w", err)
+	}
+	return votingMemberCount(members) > 1, nil
+}
+
 // readControlPlaneEndpointGate reports whether the gate is closed and, if so,
-// which park directory it names. A gate file the agent did not write names
-// none, and counts as a caller's.
+// which owner it names: a park directory, or kubeadmUpgradeApplyGateOwner. A
+// gate file the agent did not write names none, and counts as a caller's.
 func readControlPlaneEndpointGate(path string) (string, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

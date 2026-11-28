@@ -17,13 +17,15 @@ import (
 // loggingOperationProgress reports step changes to the log instead of to a
 // persisted operation record. The startup reconciler runs outside any
 // operation, so there is nothing to record progress against, but the
-// static-pod helpers still take a progress sink.
+// static-pod helpers still take a progress sink. KubeadmUpgradeApply is a unary
+// RPC with no operation record either, and reports the steps of the control
+// plane endpoint gate through it.
 type loggingOperationProgress struct {
 	reason string
 }
 
 func (p loggingOperationProgress) SetStep(step string) {
-	slog.Info("static pod park reconcile step", "reason", p.reason, "step", step)
+	slog.Info("control plane step outside an operation", "reason", p.reason, "step", step)
 }
 
 func (p loggingOperationProgress) SetResult(string) {}
@@ -126,7 +128,9 @@ func (s *NodeAgentServer) ReconcileInterruptedStaticPodParks(ctx context.Context
 	// A control plane endpoint gate the defragmentation closed is the same debt,
 	// with the gate file as its record. It is settled here and not with the
 	// kube-vip manifest, because a node behind a gate usually has no kube-vip.
-	// After the manifests, for the reason kube-vip goes last.
+	// After the manifests, for the reason kube-vip goes last. The same call opens
+	// a gate that an interrupted KubeadmUpgradeApply left closed, which parked
+	// nothing: see agentOpensControlPlaneEndpointGate.
 	s.staticPodMutationMu.Lock()
 	failures = append(failures, s.openControlPlaneEndpointGate(loggingOperationProgress{reason: "interrupted-operation-recovery"}, defaultEtcdDefragParkDir))
 	s.staticPodMutationMu.Unlock()
