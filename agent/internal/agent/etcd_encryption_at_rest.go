@@ -134,6 +134,8 @@ resources:
 //     PromoteKubernetesAPIEncryptionProviders on each node, then start one rewrite with
 //     StartEtcdEncryptionAtRestObjectsRewrite and poll GetEtcdEncryptionAtRestObjectsRewriteStatus.
 //     New clusters use kubeadm init with encryption instead of this RPC.
+//   - Does not change the kubeadm-config ConfigMap. The NVKE controller merges the encryption flags
+//     and volume into it at the end of its workflow, for control-plane nodes that join later.
 //
 // We are NOT blocking on the error status or re-checking phase here
 // instead, we check against the API manifest each time, try to recover from
@@ -284,11 +286,6 @@ func (s *NodeAgentServer) InitializeKubernetesAPIEncryption(
 			}
 			log.Printf("waiting for kube-apiserver to become ready...\n")
 			timeoutCounter++
-		}
-	}
-	if s.NodeStatus.IsMaster {
-		if err := s.updateEncryptionEntryForKubeadmConfigMap(); err != nil {
-			return response, err
 		}
 	}
 	return response, nil
@@ -884,60 +881,6 @@ func (n *NodeAgentServer) verifyNodeAPIEncryptionEnabled() (bool, error) {
 		return true, nil
 	}
 	return false, nil
-}
-
-func (n *NodeAgentServer) updateEncryptionEntryForKubeadmConfigMap() error {
-	cm, err := k8s.GetConfigMap(context.Background(), kubeSystemNamespace, kubeadmConfigMapName)
-	if err != nil {
-		log.Printf("failed to retrieve kubeadm-config configmap: %v\n", err)
-		return err
-	}
-
-	if cm == nil {
-		log.Printf("kubeadm-config configmap not found\n")
-		return errors.New("kubeadm-config configmap not found")
-	}
-
-	clusterYAML := cm.Data["ClusterConfiguration"]
-
-	var configMap map[string]any
-	if err := yaml.Unmarshal([]byte(clusterYAML), &configMap); err != nil {
-		log.Printf("error unmarshaling kubeadm config: %v", err)
-		return err
-	}
-
-	// Ensure apiServer entry exists
-	apiServer, ok := configMap["apiServer"].(map[string]any)
-	if !ok {
-		apiServer = make(map[string]any)
-		configMap["apiServer"] = apiServer
-	}
-
-	apiServer["extraVolumes"] = []any{
-		map[string]any{
-			"hostPath":  "/etc/kubernetes/encryption-config.yaml",
-			"mountPath": "/etc/kubernetes/encryption-config.yaml",
-			"name":      "encryption-config",
-			"pathType":  "File",
-			"readOnly":  true,
-		},
-	}
-
-	modifiedYAML, err := yaml.Marshal(configMap)
-	if err != nil {
-		log.Printf("error marshaling kubeadm config: %v", err)
-		return err
-	}
-
-	cm.Data["ClusterConfiguration"] = string(modifiedYAML)
-
-	err = k8s.UpdateConfigMap(context.Background(), kubeSystemNamespace, cm)
-	if err != nil {
-		log.Printf("error applying updated kubeadm-config configmap: %v", err)
-		return err
-	}
-
-	return nil
 }
 
 // labelAPIEncryptionNode writes the new key and prunes its legacy counterpart.

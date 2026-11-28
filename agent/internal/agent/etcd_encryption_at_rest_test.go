@@ -13,8 +13,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	yaml "gopkg.in/yaml.v2"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kubernetesfake "k8s.io/client-go/kubernetes/fake"
 
+	"github.com/dsx-ai-factory/nvke/agent/internal/k8s"
 	pb "github.com/dsx-ai-factory/nvke/agent/pkg/agent/proto"
+	nvkeutils "github.com/dsx-ai-factory/nvke/agent/pkg/utils"
 )
 
 func TestK8sAPIEncryptionStatusConstants(t *testing.T) {
@@ -211,6 +216,48 @@ func TestInitializeKubernetesAPIEncryptionNotControlPlane(t *testing.T) {
 	assert.Contains(t, err.Error(), "controlplane")
 	assert.NotEmpty(t, resp.ErrorMessage)
 	assert.Equal(t, K8sAPIEncryptionErrorStatus, server.NodeStatus.K8sAPIEncryption.Status)
+}
+
+// The NVKE controller merges the API encryption settings into the kubeadm-config ConfigMap at the
+// end of its workflow. The RPC must leave that ConfigMap alone, also on the node that ran kubeadm init.
+func TestInitializeKubernetesAPIEncryptionDoesNotTouchKubeadmConfig(t *testing.T) {
+	hostname, err := os.Hostname()
+	require.NoError(t, err)
+
+	clientset := kubernetesfake.NewSimpleClientset(
+		&v1.Node{ObjectMeta: metav1.ObjectMeta{Name: hostname}},
+		&v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Namespace: kubeSystemNamespace, Name: kubeadmConfigMapName},
+			Data:       map[string]string{"ClusterConfiguration": "apiVersion: kubeadm.k8s.io/v1beta4\nkind: ClusterConfiguration\n"},
+		},
+	)
+	k8s.SetClientsetForTest(clientset)
+	t.Cleanup(func() { k8s.SetClientsetForTest(nil) })
+
+	// The API server of this node already has the flag, so the RPC changes no file and does not wait.
+	describeArgs := []string{kubectlNamespaceFlag, kubeSystemNamespace, "describe", "po", "kube-apiserver-" + hostname}
+	describeAPIServer := runForCommand("kubectl", describeArgs, func(string, []string, *nvkeutils.CommandOptions) ([]byte, error) {
+		return []byte("--encryption-provider-config=/etc/kubernetes/kube-api-encryption/encryption-config.yaml"), nil
+	})
+	server := &NodeAgentServer{
+		Runner:     &MockRunner{Output: []byte("Running"), Runners: []runner{describeAPIServer}},
+		Persister:  &MockPersister{},
+		NodeStatus: &NodeStatus{Role: ControlPlaneRole, IsMaster: true},
+	}
+
+	resp, err := server.InitializeKubernetesAPIEncryption(context.Background(), &pb.InitializeKubernetesAPIEncryptionRequest{
+		EncryptionKey: "test-key",
+	})
+
+	require.NoError(t, err)
+	assert.Empty(t, resp.ErrorMessage)
+	assert.Equal(t, K8sAPIEncryptionPhaseConfigured, server.NodeStatus.K8sAPIEncryption.Phase)
+	for _, action := range clientset.Actions() {
+		assert.NotEqual(t, "configmaps", action.GetResource().Resource, "the RPC must not %s a ConfigMap", action.GetVerb())
+	}
+	node, err := clientset.CoreV1().Nodes().Get(context.Background(), hostname, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "true", node.Labels["nvke.nvidia.com/k8s-api-encryption-configured"])
 }
 
 func TestGetPodStatus(t *testing.T) {
