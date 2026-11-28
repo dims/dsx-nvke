@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Example CreateNodePoolRequest that adds a pool of nico-mock workers to a
+# cluster whose control plane nodes are pods of cluster-api-provider-podvm.
+#
+# Usage: nvkectl create nodepool -f examples/podvm-nico-mock-nodepool.yaml
+#
+# It differs from nico-mock-nodepool.yaml in one field, siteID. Such a cluster
+# has a PodVMCluster and no NicoCluster, so the machine template names the
+# site of nico-mock itself.
+#
+# clusterID is the one field you must fill in. Read it from the cluster:
+#
+#   nvkectl get clusters podvm-example -o json | jq -r '.[0].id'
+#
+# The other UUIDs are nico-mock's seeded identifiers and work as-is.
+
+clusterID: 00000000-0000-0000-0000-000000000000
+
+name: extra-workers
+nodeNamePrefix: xw
+desiredNodeCount: 1
+controlPlane: false
+systemReservedMemory: "512Mi"
+
+infra:
+  preKubeadmCommands:
+    - "mkdir -p /run/cluster-api"
+    - "echo success > /run/cluster-api/bootstrap-success.complete"
+  machineTemplate:
+    apiVersion: infrastructure.cluster.x-k8s.io/v1alpha1
+    kind: NicoMachineTemplate
+    metadata:
+      name: podvm-example-extra-workers-template
+    spec:
+      template:
+        spec:
+          siteID: 00000000-0000-0000-0000-000000000001
+          vpcID: 00000000-0000-0000-0000-000000000002
+          instanceTypeID: 00000000-0000-0000-0000-000000000005
+          cloudInitInjectHostname: true
+          ipxeScript: |
+            echo local-nico-worker
+          sshKeyGroupIDs:
+            - 00000000-0000-0000-0000-000000000004
+          interfaces:
+            - subnetID: 00000000-0000-0000-0000-000000000003
