@@ -73,4 +73,8 @@ const (
 	// PodRunningReason means the pod of the machine runs and the node agent in
 	// it answers.
 	PodRunningReason = "PodRunning"
+
+	// DeletingReason means the provider deletes the pod, the volume claims
+	// and the copy of the bootstrap Secret of a machine that is being deleted.
+	DeletingReason = "Deleting"
 )

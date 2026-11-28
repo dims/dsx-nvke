@@ -337,6 +337,58 @@ func (r *MachineReconciler) ensureClaim(
 	return nil
 }
 
+// deleteMachineResources deletes the pod, the two volume claims and the copy
+// of the bootstrap Secret of a machine. It returns the objects that still
+// exist, so the caller can wait for them.
+//
+// It reads each object directly from the API server: "gone" must be true at
+// this moment, not in a cache. An object that the provider did not make for
+// this machine stays, and does not hold the delete.
+func (r *MachineReconciler) deleteMachineResources(
+	ctx context.Context,
+	machine *infrav1.PodVMMachine,
+	logger *slog.Logger,
+) ([]string, error) {
+	namespace, podName := machine.Status.PodNamespace, machine.Status.PodName
+	objects := []struct {
+		kind   string
+		object client.Object
+		name   string
+	}{
+		{kind: "Pod", object: &corev1.Pod{}, name: podName},
+		{kind: "PersistentVolumeClaim", object: &corev1.PersistentVolumeClaim{}, name: varClaimName(podName)},
+		{kind: "PersistentVolumeClaim", object: &corev1.PersistentVolumeClaim{}, name: etcdClaimName(podName)},
+		{kind: "Secret", object: &corev1.Secret{}, name: bootstrapSecretName(podName)},
+	}
+
+	var remaining []string
+	for _, entry := range objects {
+		key := client.ObjectKey{Namespace: namespace, Name: entry.name}
+		if err := r.apiReader.Get(ctx, key, entry.object); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return nil, fmt.Errorf("failed to get %s %s: %w", entry.kind, key, err)
+		}
+		if !ownedBy(entry.object, machine) {
+			logger.Warn("Leaving an object that does not belong to this machine", "kind", entry.kind, "name", key.Name)
+			continue
+		}
+
+		remaining = append(remaining, entry.kind+"/"+entry.name)
+		if !entry.object.GetDeletionTimestamp().IsZero() {
+			continue
+		}
+		uid := entry.object.GetUID()
+		err := r.client.Delete(ctx, entry.object, client.Preconditions{UID: &uid})
+		if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
+			return nil, fmt.Errorf("failed to delete %s %s: %w", entry.kind, key, err)
+		}
+		logger.Info("Deleted an object of the machine", "kind", entry.kind, "name", key.Name)
+	}
+	return remaining, nil
+}
+
 // buildClaim builds one volume claim with the volume mode Block. The node
 // image makes the filesystem, so the provider never asks for one.
 func buildClaim(
