@@ -5,7 +5,7 @@ State of 2026-11-28. The guide uses two public branches:
 - `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `8bc32175`
 - `integration/control-plane-kata-pods` of `https://github.com/dims/kata-containers`, at `96a8d905b`
 
-**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Scenarios 1 to 5, 7 and 10 passed too. Scenario 6 did not pass at its first try. The cluster was made again for its second try, which is under way. Each other scenario ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
+**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Scenarios 1 to 7 and 10 passed too. Scenario 6 passed at its second try, on a cluster that was made again: "Known obstacles" has why. Each other scenario ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
 
 ## What the feature is
 
@@ -33,7 +33,8 @@ State of 2026-11-28. A first run is in work, on one arm64 machine with `/dev/kvm
 - The hypervisor differs. Kata Containers 4.4.0 has Cloud Hypervisor with its Rust runtime for amd64 only. On arm64 `up.sh` puts the runtime class `kata-podvm` on QEMU with the same Rust runtime. The guest kernel, the guest image and the name of the runtime class are the same.
 - On arm64 `up.sh` also gives each kind node a larger `/dev/shm`. QEMU keeps the memory of a guest there, and a container has 64 MB of it.
 - Each mark, each time and each number of this guide is from amd64.
-- Steps that passed on arm64: 1 to 13, each as it is written here, on 2026-11-28. The guest kernel of step 3 has the same file name there. Step 4 took 11 minutes, and the base image of step 5 has 1.1 GB. The pod of step 8 runs on QEMU and prints the same kernel version. No scenario ran there yet.
+- Steps that passed on arm64: 1 to 13, each as it is written here, on 2026-11-28. The guest kernel of step 3 has the same file name there. Step 4 took 11 minutes, and the base image of step 5 has 1.1 GB. The pod of step 8 runs on QEMU and prints the same kernel version.
+- Scenarios that passed on arm64: 1, on 2026-11-28. The status was `Provisioned` after 2 minutes and 26 seconds, and each of the four nodes was Ready after 3 minutes and 47 seconds. The other scenarios did not run there yet.
 
 ## The marks
 
@@ -364,7 +365,7 @@ while sleep 1; do kc get --raw /readyz --request-timeout=3s >/dev/null && echo o
 
 ### Scenario 6, turn etcd encryption on
 
-**Lab.** **Not passed at the first try in the first run of 2026-11-28.** An image built from a clone with no version tag gives a node agent that names itself by a commit, and NVKE refuses to turn encryption on with an agent whose version it cannot read. The fork of this guide had no version tag then. It has one since 2026-11-28, and a second try with new images is under way. "Known obstacles" has what you see with no tag.
+**Ran in the first run of 2026-11-28, at the second try and on a cluster that was made again.** The first try did not pass: the fork of this guide had no version tag then. "Known obstacles" has what you see with no tag.
 
 ```bash
 nvkectl patch cluster podvm-example --patch 'enableEtcdEncryption: true'
@@ -372,9 +373,21 @@ nvkectl get clusters podvm-example
 nvkectl get clusters podvm-example -o yaml | grep etcdEncrypted
 ```
 
-- **Pass.** The status goes to `Updating` and back to `Provisioned`. Then `etcdEncrypted` is `true`, and each node is Ready.
-- **If not.** If the status stays `Updating` for more than 10 minutes, search the log of the controller: `kh -n nvke-controller logs deployment/nvke-controller --since=5m | grep 'Activity error'` shows the reason. Then run the patch of scenario 5 with the tag `podvm-node:local`. A control plane node must still join after encryption.
-- **Time.** The lab measured 5 min 32 s.
+- **Pass.** The status goes to `Updating` and back to `Provisioned`. Then `etcdEncrypted` is `true`, and each node is Ready. Then run the patch of scenario 5 with the tag `podvm-node:local`. A control plane node must still join after encryption. The first run used another tag for it, because its cluster was new and ran `podvm-node:local`.
+- **If not.** If the status stays `Updating` for more than 10 minutes, search the log of the controller: `kh -n nvke-controller logs deployment/nvke-controller --since=5m | grep 'Activity error'` shows the reason.
+- **Time.** In the first run the change took 6 min 58 s, and the rollout after it 10 min 26 s. The loop of scenario 5 on the API had an answer to each call in both.
+
+To see that a new Secret is stored encrypted, read it from etcd:
+
+```bash
+kc create secret generic enc-check --from-literal=k=v
+N=$(kc get nodes -l node-role.kubernetes.io/control-plane -o name | head -n 1 | sed 's#node/##')
+kc -n kube-system exec etcd-$N -- etcdctl --endpoints=https://127.0.0.1:2379 \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt --cert=/etc/kubernetes/pki/etcd/server.crt --key=/etc/kubernetes/pki/etcd/server.key \
+  get /registry/secrets/default/enc-check --print-value-only | head -c 21; echo
+```
+
+- **See.** `k8s:enc:secretbox:v1:`. `kc get secret enc-check -o jsonpath='{.data.k}' | base64 -d` still prints `v`.
 
 ### Scenario 8, upgrade the Kubernetes version
 
