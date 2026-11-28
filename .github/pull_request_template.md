@@ -30,6 +30,7 @@ Related: <!-- #123 or N/A -->
 - [ ] gRPC API (`agent/pkg/agent/proto/`)
 - [ ] nvkectl CLI (`cli/`)
 - [ ] Cluster API provider (`cluster-api-provider-provisioned/`)
+- [ ] Pod VM Cluster API provider (`cluster-api-provider-podvm/`)
 - [ ] Helm charts or deployment (`controller/deploy/`)
 - [ ] NVKE telemetry pipeline (NKTP) integration (`deploy/nico/nktp/`)
 - [ ] nico-sim (`controller/nico-sim/`)

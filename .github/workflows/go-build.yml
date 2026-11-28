@@ -139,6 +139,13 @@ jobs:
           GO_TEST_FLAGS: -race
         run: make -C cluster-api-provider-provisioned test
 
+      # The same reason as for the provisioned provider.
+      - name: Test pod VM infrastructure provider
+        env:
+          CGO_ENABLED: "1"
+          GO_TEST_FLAGS: -race
+        run: make -C cluster-api-provider-podvm test
+
       # Likewise the release module's only unit-test lane. This is what makes
       # TestRepositoryFilesAreValid a merge-gate check rather than a test
       # someone has to remember to run: it loads release/registry.yaml,

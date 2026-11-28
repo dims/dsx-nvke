@@ -101,6 +101,7 @@ checkout, and do not stub a dependency to make the build pass.
 | `auth/authn/` | NVKE API authentication library, used by the controller | Yes |
 | `auth/authz/` | NVKE API authorization library: the client, the backend interface, the isolation check and the tenant ID rules | Yes |
 | `cluster-api-provider-provisioned/` | Provisioned Cluster API infrastructure provider | Yes |
+| `cluster-api-provider-podvm/` | Pod VM Cluster API infrastructure provider | Yes |
 | `controller/internal/` | Controller server, controllers, Temporal workflows and activities, database layer | Yes |
 | `controller/api/openapi.yaml` | OpenAPI 3.0 spec — **the source of truth for the REST API** | Yes |
 | `controller/profiles/` | Config profiles and the runbooks their hooks reference | Ask first — being moved out of this repo |
@@ -109,10 +110,13 @@ checkout, and do not stub a dependency to make the build pass.
 | `os-image/` | Reference node OS image spec, Packer recipe, `nvke-os-image-check` | Yes |
 | `controller/api/*.gen.go` | oapi-codegen output | **No — regenerate** |
 | `cluster-api-provider-provisioned/api/v1alpha1/zz_generated.deepcopy.go` | controller-gen output | **No — regenerate** |
+| `cluster-api-provider-podvm/api/v1alpha1/zz_generated.deepcopy.go` | controller-gen output | **No — regenerate** |
 | `controller/k8s-apis/v1/zz_generated.deepcopy.go` | controller-gen output | **No — regenerate** |
 | `controller/deploy/charts/controller/files/crds/*.yaml` | controller-gen output from `controller/k8s-apis/v1` | **No — regenerate** |
 | `cluster-api-provider-provisioned/config/crd/bases/*.yaml` | controller-gen output | **No — regenerate** |
 | `cluster-api-provider-provisioned/config/rbac/role.yaml` | controller-gen output | **No — regenerate** |
+| `cluster-api-provider-podvm/config/crd/bases/*.yaml` | controller-gen output | **No — regenerate** |
+| `cluster-api-provider-podvm/config/rbac/role.yaml` | controller-gen output | **No — regenerate** |
 | `management-engine/config/crd/bases/*.yaml` | `management-engine` controller-gen output | **No — regenerate** |
 | `agent/pkg/agent/proto/*.pb.go` | buf/protoc output | **No — regenerate** |
 | `agent/THIRD_PARTY_NOTICES.md` | go-licenses output | **No — regenerate** |
@@ -135,6 +139,8 @@ Keep the controller chart's `version`, `appVersion`, and README version badge at
 - Change the provisioned provider API by editing its Go types and markers,
   **then running `make generate manifests`** in
   `cluster-api-provider-provisioned/`.
+- Change the pod VM provider API the same way, **then running
+  `make generate manifests`** in `cluster-api-provider-podvm/`.
 - Add unit tests, table-driven cases, and mock implementations of the existing
   interfaces.
 - Improve documentation under `docs/`, the module `docs/` directories, and the
@@ -319,7 +325,7 @@ owner, in `controller/api/openapi-compat-waivers.yaml` — never by disabling th
 check. See
 [controller/hack/openapi-compat/README.md](controller/hack/openapi-compat/README.md).
 
-In `cluster-api-provider-provisioned/`:
+In `cluster-api-provider-provisioned/` and in `cluster-api-provider-podvm/`:
 
 ```bash
 make generate-check
