@@ -503,6 +503,9 @@ does not have the change, the behavior is absent.
 - For the control plane Service: a load balancer for Services of the type
   `LoadBalancer` that can give a fixed address.
 
+[controller/hack/podvm-kind](../controller/hack/podvm-kind/README.md) brings up
+a kind cluster with all of these on one machine.
+
 ### The node network
 
 Each pod has a second interface, `net1`, on the node network. Its address is
