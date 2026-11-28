@@ -181,9 +181,10 @@ The version, the URL and the options `-x -m` are those of the release kernel,
 for x86_64 and for aarch64, so the kernel differs from the stock kernel only by
 the two files. `-a` names the architecture of the machine. The build is tested
 on x86_64 and on aarch64.
-The build host needs `yq`, `flex`, `bison` and the headers of `libelf`.
-`tools/packaging/static-build/kernel/Dockerfile` of Kata has the full package
-list. The result is `out/opt/kata/share/kata-containers/vmlinux-6.18.62-211`.
+The build host needs a C compiler, `make`, `patch`, `flex`, `bison`, `yq` and
+the headers of `libelf`. `tools/packaging/static-build/kernel/Dockerfile` of
+Kata has the full package list. The result is
+`out/opt/kata/share/kata-containers/vmlinux-6.18.62-211`.
 
 ### The Kata handler and the RuntimeClass
 
