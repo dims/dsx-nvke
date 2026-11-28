@@ -18,6 +18,7 @@
 #              node network, the CNI plugins bridge and static
 #   multus     Multus, and the pod namespace with its network attachment
 #   kata       Kata Containers with the runtime class kata-podvm
+#   metallb    MetalLB with a pool on the node network
 #
 # Not in the default run:
 #   env        print the settings that deploy-stack.sh needs for this cluster
@@ -37,6 +38,7 @@ KATA_GUEST_DIR="${KATA_GUEST_DIR:-${STATE_DIR}/kata-guest}"
 POD_NAMESPACE="${POD_NAMESPACE:-podvm-clusters}"
 
 KATA_VERSION="${KATA_VERSION:-4.4.0}"
+METALLB_VERSION="${METALLB_VERSION:-0.16.2}"
 MULTUS_VERSION="${MULTUS_VERSION:-v4.3.2}"
 CNI_PLUGINS_VERSION="${CNI_PLUGINS_VERSION:-v1.10.0}"
 
@@ -165,6 +167,20 @@ step_kata() {
     --namespace kube-system --values "${HERE}/kata-deploy-values.yaml" --wait --timeout 15m
 }
 
+step_metallb() {
+  local _
+  log "MetalLB ${METALLB_VERSION}"
+  helm --kube-context "kind-${KIND_CLUSTER_NAME}" upgrade --install metallb metallb \
+    --repo https://metallb.github.io/metallb --version "${METALLB_VERSION}" \
+    --namespace metallb-system --create-namespace --wait --timeout 10m
+  # The webhook of MetalLB can refuse the pool for some seconds after the wait.
+  for _ in $(seq 1 30); do
+    k apply -f "${HERE}/metallb.yaml" && return 0
+    sleep 5
+  done
+  die "MetalLB did not take ${HERE}/metallb.yaml"
+}
+
 # The address of the control plane node of the host cluster on the node
 # network. A node of a tenant cluster reaches the SPIRE server there.
 step_env() {
@@ -183,11 +199,11 @@ EOF
 }
 
 if [[ $# -eq 0 ]]; then
-  set -- host network cluster nodes multus kata
+  set -- host network cluster nodes multus kata metallb
 fi
 for step in "$@"; do
   case "${step}" in
-    host | network | cluster | nodes | multus | kata | env) "step_${step}" ;;
+    host | network | cluster | nodes | multus | kata | metallb | env) "step_${step}" ;;
     *) die "unknown step ${step}: see the header of $0" ;;
   esac
 done
