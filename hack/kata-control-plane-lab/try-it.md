@@ -91,11 +91,11 @@ grep -c -E '^CONFIG_(OPENVSWITCH|INET_DIAG_DESTROY)=y' ~/kata-kernel/out/opt/kat
 
 ### 4. Build the guest image
 
-**New.** The lab put its agent into the guest image of the Kata release, with tools that are not public.
+**Ran in the first run of 2026-11-28.** The build took 6 min 24 s. If the agent of the image has the two changes shows in scenario 1.
 
 Run the commands for `kata-containers.img` of the README, section "1. Build the guest kernel and the guest image". `KATA_SRC` is the Kata tree of step 2, which has the two agent changes.
 
-- **See.** `ls -lh $KATA_GUEST_DIR/kata-containers.img` shows a file of some hundred megabytes.
+- **See.** `ls -lh $KATA_GUEST_DIR/kata-containers.img` shows a file of about 100 MB.
 - **If not.** The build runs in containers and downloads a Rust toolchain and packages. A failed download is the usual cause.
 
 ### 5. Build the base node image
