@@ -117,7 +117,7 @@ Run the commands of the README, section "2. Build the images and nvkectl", from 
 
 ### 7. Bring the host cluster up
 
-**Ran in the first run of 2026-11-28, after one fix of the branch.** At the tip `9b82daf4` the step `kata` stops, see "If not". With the fix each check below passed. The script took about 4 minutes.
+**Ran in the first run of 2026-11-28, after one fix of the branch.** The first try stopped at the step `kata`, and the fix is in the branch since the tip `f36aeee8`. With it each check below passed. The script took about 4 minutes.
 
 ```bash
 $NVKE/controller/hack/podvm-kind/up.sh
