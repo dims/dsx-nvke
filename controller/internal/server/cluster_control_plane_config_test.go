@@ -170,6 +170,17 @@ func TestValidateCreateClusterRequestFields_ControlPlaneConfig(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("accepts multiple control-plane nodes with a controlPlaneEndpoint", func(t *testing.T) {
+		svc := clusterService{}
+		req := validForgeCreateClusterRequest()
+		req.ControlPlaneEndpoint = "lb.example.com:6443"
+		req.ControlPlaneConfig = validForgeControlPlaneConfig()
+		require.Greater(t, req.ControlPlaneConfig.DesiredCount, 1)
+
+		err := svc.ValidateCreateClusterRequestFields(req)
+		require.NoError(t, err)
+	})
+
 	t.Run("rejects a nil instance type ID in instanceTypePreference", func(t *testing.T) {
 		svc := clusterService{}
 		req := validForgeCreateClusterRequest()

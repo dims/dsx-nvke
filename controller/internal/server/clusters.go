@@ -450,7 +450,7 @@ func (s *clusterService) ValidateCreateClusterRequestFields(req *api.CreateClust
 	}
 	// The cluster row does not exist yet, so ask the endpoint question of the
 	// endpoint fields the request would store.
-	requested := db.Cluster{ControlPlaneVIP: req.ControlPlaneVIP}
+	requested := db.Cluster{ControlPlaneVIP: req.ControlPlaneVIP, ControlPlaneEndpoint: req.ControlPlaneEndpoint}
 	if err := s.validateControlPlaneCapacityChange(&requested, 0, req.ControlPlaneConfig.DesiredCount); err != nil {
 		return err
 	}
@@ -1335,6 +1335,10 @@ func APIClusterFromDB(dbCluster *db.Cluster) api.Cluster {
 	if dbCluster.ControlPlaneVIP != "" {
 		controlPlaneVIP = &dbCluster.ControlPlaneVIP
 	}
+	var controlPlaneEndpoint *string
+	if dbCluster.ControlPlaneEndpoint != "" {
+		controlPlaneEndpoint = &dbCluster.ControlPlaneEndpoint
+	}
 	cpNodesRecycling := apiConditionFromDB(dbCluster.Conditions.CPNodesRecycling)
 	controlPlaneUpgrading := apiConditionFromDB(dbCluster.Conditions.ControlPlaneUpgrading)
 
@@ -1428,6 +1432,8 @@ func APIClusterFromDB(dbCluster *db.Cluster) api.Cluster {
 
 		Conditions:       conditions,
 		NodeAgentUpgrade: apiNodeAgentUpgradeFromDB(dbCluster.NodeAgentUpgrade),
+
+		ControlPlaneEndpoint: controlPlaneEndpoint,
 	}
 }
 
@@ -1520,6 +1526,8 @@ func DBClusterFromAPI(req *api.CreateClusterRequest) (db.Cluster, error) {
 			Deleting:              db.NewCondition(false, "Cluster is not being deleted"),
 			ControlPlaneUpgrading: db.NewCondition(false, "No upgrade in progress"),
 		},
+
+		ControlPlaneEndpoint: req.ControlPlaneEndpoint,
 	}
 
 	switch {

@@ -294,6 +294,87 @@ func TestOpenAPIValidator_CreateCluster(t *testing.T) {
 			})
 		}
 	})
+
+	// The schema bounds the type and the length of controlPlaneEndpoint, and the
+	// handler checks the rest. Both answer 400, and a valid value creates the
+	// cluster.
+	t.Run("controlPlaneEndpoint", func(t *testing.T) {
+		mockDB := &testutil.MockDB{}
+		mockDB.MockTx = &testutil.MockTx{}
+		mockDB.GetTx = func() db.Tx { return mockDB.MockTx }
+		mockDB.On("RunInTx", mock.Anything, mock.Anything).Return(nil).Maybe()
+		stubOpenAPICreateClusterTx(mockDB)
+
+		handler := newTestServerWithValidator(t, mockDB)
+
+		baseBytes, err := json.Marshal(openAPIForgeCreateClusterRequest())
+		require.NoError(t, err)
+
+		tests := []struct {
+			name string
+			// fields are raw JSON values set on top of the base request.
+			fields       map[string]string
+			wantStatus   int
+			wantContains string
+		}{
+			{
+				name:       "a DNS name with a port",
+				fields:     map[string]string{"controlPlaneEndpoint": `"lb.example.com:6443"`},
+				wantStatus: http.StatusCreated,
+			},
+			{
+				name:         "an explicit empty string",
+				fields:       map[string]string{"controlPlaneEndpoint": `""`},
+				wantStatus:   http.StatusBadRequest,
+				wantContains: "controlPlaneEndpoint",
+			},
+			{
+				name:         "a number",
+				fields:       map[string]string{"controlPlaneEndpoint": `6443`},
+				wantStatus:   http.StatusBadRequest,
+				wantContains: "controlPlaneEndpoint",
+			},
+			{
+				// The handler accepts this host and port. Only the schema refuses the 261 characters.
+				name:         "a value above the length limit",
+				fields:       map[string]string{"controlPlaneEndpoint": `"` + strings.Repeat(strings.Repeat("a", 63)+".", 3) + strings.Repeat("a", 61) + `:0006443"`},
+				wantStatus:   http.StatusBadRequest,
+				wantContains: "controlPlaneEndpoint",
+			},
+			{
+				name: "together with controlPlaneVIP",
+				fields: map[string]string{
+					"controlPlaneEndpoint": `"lb.example.com:6443"`,
+					"controlPlaneVIP":      `"172.31.0.10"`,
+				},
+				wantStatus:   http.StatusBadRequest,
+				wantContains: "mutually exclusive",
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				var body map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal(baseBytes, &body))
+				for field, value := range tt.fields {
+					body[field] = json.RawMessage(value)
+				}
+				bodyBytes, err := json.Marshal(body)
+				require.NoError(t, err)
+
+				req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/clusters", bytes.NewReader(bodyBytes))
+				req.Header.Set("Content-Type", "application/json")
+
+				rr := httptest.NewRecorder()
+				handler.ServeHTTP(rr, req)
+
+				assert.Equal(t, tt.wantStatus, rr.Code, "body: %s", rr.Body.String())
+				if tt.wantContains != "" {
+					assert.Contains(t, rr.Body.String(), tt.wantContains)
+				}
+			})
+		}
+	})
 }
 
 // TestOpenAPIValidator_UpdateCluster verifies that the OpenAPI request validator
@@ -813,6 +894,21 @@ func TestOpenAPIValidator_MachineMetadataIsCreateOnly(t *testing.T) {
 			require.Contains(t, rr.Body.String(), field)
 		})
 	}
+}
+
+// The controlPlaneEndpoint of a cluster is fixed at creation. PATCH does not
+// have the field in its schema, so the validator rejects it before the handler
+// runs.
+func TestOpenAPIValidator_ControlPlaneEndpointIsCreateOnly(t *testing.T) {
+	handler := newTestServerWithValidator(t, &testutil.MockDB{})
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPatch,
+		"/api/clusters/550e8400-e29b-41d4-a716-446655440000",
+		strings.NewReader(`{"controlPlaneEndpoint":"lb.example.com:6443"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+	require.Contains(t, rr.Body.String(), "controlPlaneEndpoint")
 }
 
 func TestOpenAPIValidator_ControlPlaneMachineMetadataIsCreateOnly(t *testing.T) {
