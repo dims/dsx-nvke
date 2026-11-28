@@ -138,8 +138,11 @@ tags:
       CIDR must have room for every desired node plus surge, or one spare block
       when surge is 0. This is checked when clusters and node pools are created
       or scaled. Set `controlPlaneVIP` to use a virtual IP (kube-vip) as the API
-      server endpoint; when omitted, the first control-plane node's IP is the
-      endpoint. The VIP must not fall inside the pod or service CIDR.
+      server endpoint. Set `controlPlaneEndpoint` instead to use an address that
+      NVKE does not manage, for example a load balancer; NVKE then configures no
+      kube-vip. When both are omitted, the first control-plane node's IP is the
+      endpoint. The VIP, and an IPv4 host of `controlPlaneEndpoint`, must not
+      fall inside the pod or service CIDR.
   - name: Control plane
     description: |
       NVKE manages each cluster's control plane through a dedicated control-plane
@@ -227,7 +230,7 @@ paths:
         missing `controlPlaneConfig.nico.release`; a
         control-plane `maxSurge` greater than 1; a pod CIDR too small for the
         requested nodes plus surge; a `controlPlaneVIP` inside the pod or
-        service CIDR.
+        service CIDR; an IPv4 `controlPlaneEndpoint` host inside either; both of these fields in one request.
       requestBody:
         required: true
         description: The cluster to create.
@@ -943,7 +946,7 @@ paths:
         Returns 400 when deletion would leave no joined control-plane node or
         `machineHealthIssue` is invalid. Delete the cluster to remove its last
         joined control-plane node.
-        Deleting a control-plane node requires controlPlaneVIP because the controller
+        Deleting a control-plane node requires controlPlaneVIP or controlPlaneEndpoint because the controller
         replaces it, unless allowControlPlaneWithoutVIP is enabled for development.
         Worker node deletion is unaffected.
 
@@ -1133,16 +1136,39 @@ components:
           format: ipv4
           description: |
             Virtual IP for the API server through kube-vip. Omit to skip kube-vip and
-            use the first control-plane node's IP as the API server endpoint. Must not
-            fall inside the pod or service CIDR. An explicit empty string is rejected.
-            By default, a cluster without a VIP must have exactly one desired
-            control-plane node. Scale-up above one node, upgrades and node replacement
-            require a VIP unless the controller deployment enables the development-only
+            use the first control-plane node's IP as the API server endpoint, or the
+            address in `controlPlaneEndpoint` when that is set. Must not fall inside
+            the pod or service CIDR. An explicit empty string is rejected. Mutually
+            exclusive with `controlPlaneEndpoint`.
+            By default, a cluster without a VIP and without `controlPlaneEndpoint`
+            must have exactly one desired control-plane node. Scale-up above one
+            node, upgrades and node replacement require one of the two unless the
+            controller deployment enables the development-only
             allowControlPlaneWithoutVIP setting. That override keeps the initializing
             node's IP as the endpoint; replacing that node can break API access.
             Quorum, health and deletion protections still apply.
           x-go-type-skip-optional-pointer: true
           x-order: 9
+        controlPlaneEndpoint:
+          type: string
+          minLength: 1
+          maxLength: 259
+          example: "lb.example.com:6443"
+          description: |
+            API server endpoint that NVKE does not manage, as `host` or `host:port`,
+            the same form as the kubeadm `controlPlaneEndpoint` field. The host is an
+            IPv4 address or a DNS name. Without a port, kubeadm uses the API server
+            port, 6443. Use it for an address that reaches the API servers of the
+            control-plane nodes without NVKE, for example a load balancer. NVKE
+            gives the value to kubeadm as the control-plane endpoint and does not
+            configure kube-vip. NVKE does not create or check the address.
+            The cluster counts as one with a stable endpoint, the same as with
+            `controlPlaneVIP`: it can have more than one control-plane node, and
+            scale-up, upgrades and node replacement are allowed.
+            Mutually exclusive with `controlPlaneVIP`. An IPv4 host must not fall
+            inside the pod or service CIDR. Fixed at creation. An explicit empty
+            string is rejected.
+          x-go-type-skip-optional-pointer: true
         teleportEnabled:
           x-fern-ignore: true
           type: boolean
@@ -1242,7 +1268,7 @@ components:
         desiredCount:
           type: integer
           minimum: 1
-          description: The desired number of cluster-level control plane nodes. Creating a cluster with or increasing this count above 1 requires controlPlaneVIP on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
+          description: The desired number of cluster-level control plane nodes. Creating a cluster with or increasing this count above 1 requires controlPlaneVIP or controlPlaneEndpoint on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
           x-go-type-skip-optional-pointer: true
         maxSurge:
           type: integer
@@ -1414,7 +1440,7 @@ components:
         desiredCount:
           type: integer
           minimum: 1
-          description: The desired number of cluster-level control plane nodes. Must be at least 1. Values above 1 require controlPlaneVIP on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
+          description: The desired number of cluster-level control plane nodes. Must be at least 1. Values above 1 require controlPlaneVIP or controlPlaneEndpoint on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
           x-go-type-skip-optional-pointer: true
         maxSurge:
           type: integer
@@ -1501,7 +1527,7 @@ components:
         Changes to `release` or the Kubernetes version start a control-plane
         rollout. All fields are optional. A provider payload that does not match the
         cluster's provider is rejected with 400.
-        Rollout-triggering changes require controlPlaneVIP unless the development-only
+        Rollout-triggering changes require controlPlaneVIP or controlPlaneEndpoint unless the development-only
         allowControlPlaneWithoutVIP setting is enabled. maxSurge alone does not
         trigger a rollout and remains mutable without a VIP.
       properties:
@@ -1510,7 +1536,7 @@ components:
           minimum: 1
           description: |
             The desired number of cluster-level control plane nodes. Must be at least 1.
-            Increasing the count above 1 requires controlPlaneVIP on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
+            Increasing the count above 1 requires controlPlaneVIP or controlPlaneEndpoint on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
         maxSurge:
           type: integer
           minimum: 0
@@ -1587,6 +1613,13 @@ components:
           format: ipv4
           description: API server VIP, if configured.
           x-order: 10
+        controlPlaneEndpoint:
+          type: string
+          example: "lb.example.com:6443"
+          description: |
+            API server endpoint that NVKE does not manage, as `host` or `host:port`,
+            if the cluster was created with one. Never set together with
+            `controlPlaneVIP`.
         enableCPNodeRecycling:
           type: boolean
           default: false
@@ -1658,7 +1691,7 @@ components:
             Target control-plane version, as X.Y.Z with no leading "v". Must be newer than
             the current version by at most one minor version and keep every worker pool
             within 3 minor versions.
-            The cluster must have controlPlaneVIP configured unless the development-only
+            The cluster must have controlPlaneVIP or controlPlaneEndpoint configured unless the development-only
             allowControlPlaneWithoutVIP setting is enabled.
         teleportEnabled:
           x-fern-ignore: true
@@ -1914,7 +1947,7 @@ components:
         desiredNodeCount:
           type: integer
           minimum: 0
-          description: The desired number of nodes in the pool. For control-plane pools, aggregate capacity above 1 requires controlPlaneVIP on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
+          description: The desired number of nodes in the pool.
           x-order: 15
         description:
           type: string
@@ -1965,7 +1998,7 @@ components:
         All fields are optional. A provider payload that does not match the node pool's
         cluster is rejected with 400.
         Updating a control-plane pool in a way that creates a replacement node set
-        requires controlPlaneVIP unless the development-only allowControlPlaneWithoutVIP
+        requires controlPlaneVIP or controlPlaneEndpoint unless the development-only allowControlPlaneWithoutVIP
         setting is enabled. maxSurge alone does not create a replacement
         and remains mutable without a VIP.
       # No required fields since all fields are optional
@@ -1991,7 +2024,7 @@ components:
         desiredNodeCount:
           type: integer
           minimum: 0
-          description: The desired number of nodes in the pool. Increasing aggregate control-plane capacity above 1 requires controlPlaneVIP on the cluster unless the development-only allowControlPlaneWithoutVIP setting is enabled.
+          description: The desired number of nodes in the pool.
         recycleBudget:
           type: integer
           minimum: 0
