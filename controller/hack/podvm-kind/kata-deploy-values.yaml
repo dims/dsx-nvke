@@ -13,6 +13,11 @@ shims:
   disableAll: true
   clh-runtime-rs:
     enabled: true
+# The default shim of the chart is a QEMU shim, and the installer refuses a
+# default that is not one of the shims above.
+defaultShim:
+  amd64: clh-runtime-rs
+  arm64: clh-runtime-rs
 customRuntimes:
   enabled: true
   runtimes:
