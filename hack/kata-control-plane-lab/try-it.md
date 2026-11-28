@@ -17,13 +17,23 @@ State of 2026-11-28. The guide uses two public branches:
 
 ## What you need
 
-- One Linux machine on amd64 with `/dev/kvm`. In a virtual machine, nested virtualization must be on.
+- One Linux machine on amd64 or arm64 with `/dev/kvm`. In a virtual machine, nested virtualization must be on. Each step is tested on amd64. On arm64 the first run is in work, and "On arm64" has its state.
 - 16 CPUs, 48 GB of memory and 100 GB of free disk. Our lab machine was larger, and a smaller one never ran.
 - `sudo` rights, for `modprobe`, `sysctl` and `losetup`.
 - Docker 28 or newer with `buildx`. A container must reach the internet.
 - `git`, `make`, a C compiler, `python3`, `curl`, `jq`, `tar` with `zstd`, Go 1.27, `kind`, `kubectl`, `helm`, `clusterctl`, and for the kernel build `yq`, `flex`, `bison`, `patch` and the headers of `libelf`.
 - The NVKE tree pins the versions that it is tested with: `kind`, `kubectl`, `helm` and Cluster API (for `clusterctl`) in `make/tool-versions.mk`, and Go in `go.work`. The first run used these versions.
 - No account and no secret. Each input is public.
+
+## On arm64
+
+State of 2026-11-28. No step of this guide has passed on arm64 yet. A first run is in work, on one arm64 machine with `/dev/kvm`.
+
+- The commands are the same on both architectures. The README and the scripts take the architecture from the machine.
+- The hypervisor differs. Kata Containers 4.4.0 has Cloud Hypervisor with its Rust runtime for amd64 only. On arm64 `up.sh` puts the runtime class `kata-podvm` on QEMU with the same Rust runtime. The guest kernel, the guest image and the name of the runtime class are the same.
+- On arm64 `up.sh` also gives each kind node a larger `/dev/shm`. QEMU keeps the memory of a guest there, and a container has 64 MB of it.
+- Each mark, each time and each number of this guide is from amd64.
+- Steps that passed on arm64: none yet.
 
 ## The marks
 
@@ -245,7 +255,7 @@ controlPlaneConfig:
 EOF
 }
 load() { for n in $(kind get nodes --name podvm); do
-  docker save --platform linux/amd64 "$1" | docker exec -i "$n" ctr -n k8s.io images import --digests -; done; }
+  docker save --platform "linux/$(go env GOARCH)" "$1" | docker exec -i "$n" ctr -n k8s.io images import --digests -; done; }
 ```
 
 `nodes` lists each node of the cluster with its ID. `template` prints a patch with the machine template for one node image. `load` puts an image into the kind nodes.
