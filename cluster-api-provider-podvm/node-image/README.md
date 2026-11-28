@@ -151,6 +151,10 @@ and the Rust runtime (the configuration `clh-runtime-rs`), on amd64. The names
 below are those of that release. The provider README lists the other needs of
 the host cluster.
 
+That release has `clh-runtime-rs` for amd64 only. On arm64 its Rust runtime
+has QEMU (the configuration `qemu-runtime-rs`). The first run on arm64, with
+that configuration, is in work.
+
 ### The guest kernel
 
 The guest kernel configuration of that release has no Open vSwitch and no
@@ -176,8 +180,10 @@ build build
 DESTDIR="$PWD/out" PREFIX=/opt/kata build install
 ```
 
-The version, the URL and the options `-x -m` are those of the release kernel
-for x86_64, so the kernel differs from the stock kernel only by the two files.
+The version, the URL and the options `-x -m` are those of the release kernel,
+for x86_64 and for aarch64, so the kernel differs from the stock kernel only by
+the two files. `-a` names the architecture of the machine. The build is tested
+on x86_64. On aarch64 the first run is in work.
 The build host needs `yq`, `flex`, `bison` and the headers of `libelf`.
 `tools/packaging/static-build/kernel/Dockerfile` of Kata has the full package
 list. The result is `out/opt/kata/share/kata-containers/vmlinux-6.18.62-211`.
