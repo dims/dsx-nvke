@@ -5,7 +5,7 @@ State of 2026-11-28. The guide uses two public branches:
 - `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `7da67615`
 - `integration/control-plane-kata-pods` of `https://github.com/dims/kata-containers`, at `96a8d905b`
 
-**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Scenarios 1 to 5 passed too. Each other scenario ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
+**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Scenarios 1 to 5 passed too. Scenario 6 did not pass. Each other scenario ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
 
 ## What the feature is
 
@@ -354,14 +354,16 @@ while sleep 1; do kc get --raw /readyz --request-timeout=3s >/dev/null && echo o
 
 ### Scenario 6, turn etcd encryption on
 
-**Lab.**
+**Lab.** **Not passed in the first run of 2026-11-28.** NVKE did not start the change. It needs a node agent of the version 0.1.26 or newer. The build of step 5 takes the version of the node agent from the version tags of the tree, and this fork has no tag, so the agent names itself by a commit hash. The status of the cluster then stays `Updating` for 30 minutes. The scenario runs again when the fork has the tags.
 
 ```bash
 nvkectl patch cluster podvm-example --patch 'enableEtcdEncryption: true'
-nvkectl get clusters podvm-example -o yaml | grep -E 'etcdEncrypted|status'
+nvkectl get clusters podvm-example
+nvkectl get clusters podvm-example -o yaml | grep etcdEncrypted
 ```
 
-- **Pass.** The status goes to `Updating` and back to `Provisioned`. Then `etcdEncrypted` is `true`, and each node is Ready. Then run the patch of scenario 5 with the tag `podvm-node:local`. A control plane node must still join after encryption.
+- **Pass.** The status goes to `Updating` and back to `Provisioned`. Then `etcdEncrypted` is `true`, and each node is Ready.
+- **If not.** If the status stays `Updating` for more than 10 minutes, search the log of the controller: `kh -n nvke-controller logs deployment/nvke-controller --since=5m | grep 'Activity error'` shows the reason. Then run the patch of scenario 5 with the tag `podvm-node:local`. A control plane node must still join after encryption.
 - **Time.** The lab measured 5 min 32 s.
 
 ### Scenario 7, a full failure domain

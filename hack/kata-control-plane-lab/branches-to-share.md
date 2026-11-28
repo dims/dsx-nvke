@@ -1,6 +1,6 @@
 # Branches to share: NVKE control plane nodes as Kata pods
 
-Last update: 2026-11-28, 10:45 local time. Each tip in the state table was the tip of its branch on the fork at that time (fetched at 10:45).
+Last update: 2026-11-28, 11:23 local time. Each tip in the state table was the tip of its branch on the fork at that time (fetched at 11:23).
 
 This page lists the only branches that the larger team needs. Each of the eleven is meant to become one pull request. No pull request is open yet. One more branch, `integration/control-plane-kata-pods`, holds the commits of the ten NVKE branches together, for a person who wants to try the feature. It is not for a pull request. Every other branch on the two forks is lab material and is not for sharing.
 
@@ -12,7 +12,7 @@ This page lists the only branches that the larger team needs. Each of the eleven
 | # | Branch | Tip | Commits | Lines changed | State |
 |---|---|---|---|---|---|
 | 1 | `fix/agent-upload-certs-config` | `23d61df4` | 1 | 330 added, 66 removed | Ready. Made smaller after a fresh review, which found no bug. The smaller form is on the fork since 2026-11-28 |
-| 2 | `fix/agent-encryption-join-config` | `df409c97` | 1 | 49 added, 59 removed | Ready in a new, small form: a delete in the agent, where the first form added 562 lines. Davanum chose it on 2026-11-28. The lab has not run this form yet |
+| 2 | `fix/agent-encryption-join-config` | `df409c97` | 1 | 49 added, 59 removed | Ready in a new, small form: a delete in the agent, where the first form added 562 lines. Davanum chose it on 2026-11-28. No cluster has run this form yet. In the first run of the try-out guide the encryption scenario could not start for another cause: the controller refuses the version of a node agent that was built from a clone with no version tag, and the fork has no tag |
 | 3 | `fix/nico-sim-wait-for-systemd` | `7bf172e6` | 1 | 195 added, 6 removed | Ready. One sentence of the commit message was corrected on 2026-11-28, the code is the same |
 | 4 | `docs/adr-control-plane-nodes-as-kata-pods` | `26828722` | 1 | 66 added | Ready. Corrected on 2026-11-27 after a fresh read of the docs |
 | 5 | `feat/control-plane-endpoint` | `120b0ff2` | 8 | 1,289 added, 475 removed | Ready. The must fix of the fresh review is in since 2026-11-28: the API reference names both fields. The lab has not run this form yet |
@@ -25,7 +25,7 @@ This page lists the only branches that the larger team needs. Each of the eleven
 
 "Ready" means that the commits are final in content. After the rework, all branches are built together again and the lab tests run again. This page gets the result.
 
-State on 2026-11-28: each branch has the points of its fresh review. The first run of the guide `try-it.md` is in work since 2026-11-28 on the second lab machine, from the two public integration branches. All 13 set up steps passed, and then the first cluster request: one request through `nvkectl` gave a cluster with three control plane nodes as Kata pods and one worker of the simulator, each Ready after 5 minutes and 37 seconds, with no step by hand. That was the first run in a cluster of the final forms of branches 8, 9 and 11. The run found four faults of the product so far, each in the README or a values file of branch 11, and each fix is on the fork. No fault of another branch showed. Nine more scenarios are in work, with the first run of the small form of branch 2 among them. The run report is in the private notes of the lab.
+State on 2026-11-28: each branch has the points of its fresh review. The first run of the guide `try-it.md` is in work since 2026-11-28 on the second lab machine, from the two public integration branches. All 13 set up steps passed, and then five scenarios: the first cluster from one request (three control plane nodes as Kata pods and one worker of the simulator, each Ready after 5 minutes and 37 seconds, with no step by hand), pod traffic between the nodes, a lost pod that comes back on its volumes, the replace of a control plane node, and a rollout of the control plane to a new image. In the replace and in the rollout the API answered each call through the shared address (445 and 620 calls, one each second), and the health gate of branch 6 took each old node out of the Service first. That was the first run in a cluster of the final forms of branches 6, 8, 9 and 11. The run found four faults of the product so far, each in the README or a values file of branch 11, and each fix is on the fork. No fault of another branch showed. The encryption scenario did not pass: the fork has no version tag, so the node agent of an image built from a clone names itself by a commit, and the controller refuses that version. So branch 2 has no run yet. Four more scenarios are in work. The run report is in the private notes of the lab.
 
 Before a pull request, each branch still needs these things. They are rules of the repository (`CONTRIBUTING.md`, `docs/pull-request-triage.md`):
 
