@@ -1,0 +1,267 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  labels:
+    cluster.x-k8s.io/provider: infrastructure-podvm
+    cluster.x-k8s.io/v1beta2: v1alpha1
+  name: podvmclusters.infrastructure.cluster.x-k8s.io
+spec:
+  group: infrastructure.cluster.x-k8s.io
+  names:
+    categories:
+    - cluster-api
+    kind: PodVMCluster
+    listKind: PodVMClusterList
+    plural: podvmclusters
+    shortNames:
+    - pvmc
+    singular: podvmcluster
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.initialization.provisioned
+      name: Provisioned
+      type: boolean
+    - jsonPath: .spec.podNamespace
+      name: PodNamespace
+      type: string
+    - jsonPath: .spec.addressRange.cidr
+      name: Addresses
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: PodVMCluster is the Schema for the podvmclusters API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              PodVMClusterSpec defines the desired state of PodVMCluster.
+
+              The spec holds no control plane endpoint. The NVKE controller takes the
+              endpoint from the controlPlaneEndpoint field of its own cluster API and
+              ignores an endpoint on the infrastructure cluster.
+            properties:
+              addressRange:
+                description: |-
+                  AddressRange is the block of fixed addresses for the pods of this
+                  cluster. It must not overlap the block of another PodVMCluster.
+                properties:
+                  cidr:
+                    description: |-
+                      CIDR is the block of IPv4 addresses, for example 172.28.1.0/24. The
+                      provider gives each machine the lowest free address of the block. It
+                      does not use the first and the last address of the block, and it does
+                      not use the network address and the broadcast address of the node
+                      network.
+                    maxLength: 18
+                    minLength: 9
+                    type: string
+                  prefixLength:
+                    description: |-
+                      PrefixLength is the prefix length of the node network. The provider
+                      writes it with each address, for example 172.28.1.21/16. The node
+                      network must contain the block of cidr, so the prefix length cannot be
+                      larger than the prefix length of cidr.
+                    format: int32
+                    maximum: 32
+                    minimum: 1
+                    type: integer
+                required:
+                - cidr
+                - prefixLength
+                type: object
+                x-kubernetes-validations:
+                - message: addressRange is immutable
+                  rule: self == oldSelf
+              failureDomainLabelKey:
+                default: topology.kubernetes.io/zone
+                description: |-
+                  FailureDomainLabelKey is the node label of the host cluster that names
+                  a failure domain. The provider publishes one failure domain for each
+                  value of this label. When no node carries the label, the provider
+                  publishes one failure domain for each host node, from the label
+                  kubernetes.io/hostname.
+                maxLength: 317
+                type: string
+              networkAttachment:
+                description: |-
+                  NetworkAttachment names the NetworkAttachmentDefinition of the node
+                  network. Each pod gets one more interface on that network, with a fixed
+                  address and a fixed hardware address.
+                properties:
+                  name:
+                    description: Name is the name of the NetworkAttachmentDefinition.
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace is the namespace of the NetworkAttachmentDefinition. When it is
+                      empty, the provider uses spec.podNamespace.
+                    maxLength: 63
+                    type: string
+                required:
+                - name
+                type: object
+              podNamespace:
+                description: |-
+                  PodNamespace is the namespace of the host cluster in which the provider
+                  makes the pods, the volume claims and the copies of the bootstrap
+                  Secrets. The namespace must exist. The provider does not make it and
+                  does not delete it.
+                maxLength: 63
+                minLength: 1
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+                x-kubernetes-validations:
+                - message: podNamespace is immutable
+                  rule: self == oldSelf
+              runtimeClassName:
+                description: |-
+                  RuntimeClassName is the RuntimeClass of each pod. It must name a Kata
+                  runtime whose guest kernel has what a Kubernetes node needs.
+                maxLength: 253
+                minLength: 1
+                type: string
+            required:
+            - addressRange
+            - networkAttachment
+            - podNamespace
+            - runtimeClassName
+            type: object
+          status:
+            description: PodVMClusterStatus defines the observed state of PodVMCluster.
+            properties:
+              conditions:
+                description: Conditions describes the current state.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              failureDomains:
+                description: |-
+                  FailureDomains lists the failure domains of the host cluster. Each one
+                  can hold a control plane machine. Cluster API copies the list to the
+                  Cluster, and the NVKE controller picks one domain for each control plane
+                  machine.
+                items:
+                  description: |-
+                    FailureDomain is the Schema for Cluster API failure domains.
+                    It allows controllers to understand how many failure domains a cluster can optionally span across.
+                  properties:
+                    attributes:
+                      additionalProperties:
+                        type: string
+                      description: attributes is a free form map of attributes an
+                        infrastructure provider might use or require.
+                      type: object
+                    controlPlane:
+                      description: controlPlane determines if this failure domain
+                        is suitable for use by control plane machines.
+                      type: boolean
+                    name:
+                      description: name is the name of the failure domain.
+                      maxLength: 256
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              initialization:
+                description: Initialization reports the state that the Cluster API
+                  contract requires.
+                minProperties: 1
+                properties:
+                  provisioned:
+                    description: |-
+                      Provisioned is true when the spec is valid. The core Cluster API machine
+                      controller waits for this field before it acts on any machine of the
+                      cluster.
+                    type: boolean
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
