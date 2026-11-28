@@ -153,6 +153,11 @@ spec:
                   NetworkAttachment names the NetworkAttachmentDefinition of the node
                   network. Each pod gets one more interface on that network, with a fixed
                   address and a fixed hardware address.
+
+                  It cannot change. The address range is a block of this network, and
+                  the machines that exist are on it. With a new value the next pod of
+                  each machine would be on another network than the pods that still run,
+                  with an address of the same block.
                 properties:
                   name:
                     description: Name is the name of the NetworkAttachmentDefinition.
@@ -168,6 +173,9 @@ spec:
                 required:
                 - name
                 type: object
+                x-kubernetes-validations:
+                - message: networkAttachment is immutable
+                  rule: self == oldSelf
               podNamespace:
                 description: |-
                   PodNamespace is the namespace of the host cluster in which the provider

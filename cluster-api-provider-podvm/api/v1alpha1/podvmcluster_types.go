@@ -115,6 +115,12 @@ type PodVMClusterSpec struct {
 	// NetworkAttachment names the NetworkAttachmentDefinition of the node
 	// network. Each pod gets one more interface on that network, with a fixed
 	// address and a fixed hardware address.
+	//
+	// It cannot change. The address range is a block of this network, and
+	// the machines that exist are on it. With a new value the next pod of
+	// each machine would be on another network than the pods that still run,
+	// with an address of the same block.
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="networkAttachment is immutable"
 	NetworkAttachment NetworkAttachmentReference `json:"networkAttachment"`
 
 	// AddressRange is the block of fixed addresses for the pods of this
