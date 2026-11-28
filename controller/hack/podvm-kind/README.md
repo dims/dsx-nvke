@@ -25,6 +25,9 @@ same set on one Linux machine, in a kind cluster, so that the
   its kernel build needs more.
 - `python3`, `curl`, `jq`, and `tar` with `zstd`. The scripts and the commands
   of this page call them.
+- The versions that this repository is tested with: `make/tool-versions.mk`
+  pins `kind`, `kubectl`, `helm` and Cluster API, which is also the version of
+  `clusterctl`, and `go.work` pins Go.
 - `sudo` rights, for `modprobe`, `sysctl` and `losetup`.
 - A machine where a container reaches the internet. A kind node installs one
   package and pulls images, and a node of the tenant cluster pulls images.
