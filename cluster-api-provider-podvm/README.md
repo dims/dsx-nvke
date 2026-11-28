@@ -399,9 +399,8 @@ The NVKE controller takes the two objects on its `infra` path:
 }
 ```
 
-The controller chart grants no rights for these kinds. The NVKE controller
-needs `create`, `delete`, `get`, `list`, `patch` and `watch` on the three kinds,
-and `get` on their three CRDs.
+The controller chart grants the NVKE controller the rights for the three kinds
+and their CRDs with the values `capi.rbac.create` and `capi.rbac.podvm`.
 
 ## Install
 

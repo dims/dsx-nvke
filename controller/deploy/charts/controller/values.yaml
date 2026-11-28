@@ -442,6 +442,11 @@ capi:
     # launchlayermachinetemplates). Only applies when `create` is true.
     # Keep it true while CAPLL's CRDs are installed.
     launchLayer: true
+    # -- Grant RBAC for the pod VM provider's CRDs (podvmclusters, podvmmachines,
+    # podvmmachinetemplates). Only applies when `create` is true. Set it true
+    # where cluster-api-provider-podvm is installed and `supportedInfraProviders`
+    # includes `infra`.
+    podvm: false
 
 kubeadm:
   # -- OCI registry kubeadm uses for control-plane component images.

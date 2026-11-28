@@ -78,6 +78,7 @@ echo "provider RBAC toggles:"
 out="$(render --set capi.rbac.create=true)"
 clusterrole "grants NICo RBAC by default" nico 1 "${out}"
 clusterrole "grants LaunchLayer RBAC by default" launchlayer 1 "${out}"
+clusterrole "omits pod VM RBAC by default" podvm 0 "${out}"
 # Provider credentials live in the providers' own namespaces; the controller
 # reads Secrets only through namespaced Roles.
 if [[ -z "$(yq 'select(.kind == "ClusterRole") | .rules[] | select((.resources // []) | map(test("^(secrets|[*])$")) | any)' <<<"${out}")" ]]; then
@@ -90,6 +91,20 @@ out="$(render --set capi.rbac.create=true --set capi.rbac.nico=false --set contr
 clusterrole "omits NICo RBAC when capi.rbac.nico is false" nico 0 "${out}"
 out="$(render --set capi.rbac.create=true --set capi.rbac.launchLayer=false)"
 clusterrole "omits LaunchLayer RBAC when capi.rbac.launchLayer is false" launchlayer 0 "${out}"
+out="$(render --set capi.rbac.create=true --set capi.rbac.podvm=true)"
+clusterrole "grants pod VM RBAC when capi.rbac.podvm is true" podvm 1 "${out}"
+podvm_rules="$(yq 'select(.kind == "ClusterRole" and .metadata.name == "cwe-nvke-controller-podvm") | .rules' <<<"${out}")"
+if [[ "$(yq '.[0].resources | join(",")' <<<"${podvm_rules}")" == "podvmclusters,podvmmachines,podvmmachinetemplates" &&
+  "$(yq '.[0].verbs | join(",")' <<<"${podvm_rules}")" == "create,delete,get,list,patch,watch" &&
+  "$(yq '.[1].resourceNames | length' <<<"${podvm_rules}")" == "3" &&
+  "$(yq '.[1].verbs | join(",")' <<<"${podvm_rules}")" == "get" ]]; then
+  printf '  ok    %s\n' "pod VM RBAC covers the three kinds and reads their CRDs by name"
+else
+  printf '  FAIL  %s\n' "pod VM RBAC does not cover the three kinds, or does not read their CRDs by name" >&2
+  failures=$((failures + 1))
+fi
+out="$(render --set capi.rbac.podvm=true)"
+clusterrole "omits pod VM RBAC when capi.rbac.create is false" podvm 0 "${out}"
 
 if [[ "${failures}" -ne 0 ]]; then
   echo "${failures} chart provider assertion(s) failed" >&2
