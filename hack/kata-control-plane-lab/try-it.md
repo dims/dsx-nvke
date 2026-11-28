@@ -108,11 +108,11 @@ Run the two commands of `cluster-api-provider-podvm/node-image/README.md`, secti
 
 ### 6. Build the other images and nvkectl
 
-**Ran in the first run of 2026-11-28.** The five commands took 1 min 54 s.
+**Ran in the first run of 2026-11-28.** The README had five commands then, and they took 1 min 54 s. The sixth command, the build of the image of the profiles, came into the README during the run. It ran in step 12 of that run and makes an image of 4 MB.
 
 Run the commands of the README, section "2. Build the images and nvkectl", from `$NVKE`.
 
-- **See.** `docker image inspect podvm-node:local nvke-controller:local cluster-api-provider-podvm:latest --format '{{.RepoTags}}'` prints three lines, and `nvkectl version` prints a version.
+- **See.** `docker image inspect podvm-node:local nvke-controller:local cluster-api-provider-podvm:latest docker.local/cwe-profiles:tilt --format '{{.RepoTags}}'` prints four lines, and `nvkectl version` prints a version.
 - The node image of this tree never ran in a pod. Scenario 1 is its first run.
 
 ### 7. Bring the host cluster up
@@ -163,11 +163,11 @@ kh delete pod kata-check
 
 ### 9. Load the images into the kind nodes
 
-**Ran in the first run of 2026-11-28.** The load took 2 min 22 s.
+**Ran in the first run of 2026-11-28.** The load of the three large images took 2 min 22 s. The fourth, the image of the profiles, came into the loop during the run and went into the nodes in step 12.
 
 Run the loop of the README, section "3. Bring the host cluster up".
 
-- **See.** `docker exec podvm-worker crictl images | grep -c -E 'podvm-node|nvke-controller|cluster-api-provider-podvm'` prints `3`.
+- **See.** `docker exec podvm-worker crictl images | grep -c -E 'podvm-node|nvke-controller|cluster-api-provider-podvm|cwe-profiles'` prints `4`.
 
 ### 10. Install Cluster API and the provider
 
