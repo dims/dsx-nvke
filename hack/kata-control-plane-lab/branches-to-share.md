@@ -1,6 +1,6 @@
 # Branches to share: NVKE control plane nodes as Kata pods
 
-Last update: 2026-11-28, 08:44 local time. Each tip in the state table was the tip of its branch on the fork at that time (fetched at 08:44).
+Last update: 2026-11-28, 08:47 local time. Each tip in the state table was the tip of its branch on the fork at that time (fetched at 08:47).
 
 This page lists the only branches that the larger team needs. Each of the eleven is meant to become one pull request. No pull request is open yet. One more branch, `integration/control-plane-kata-pods`, holds the commits of the ten NVKE branches together, for a person who wants to try the feature. It is not for a pull request. Every other branch on the two forks is lab material and is not for sharing.
 
@@ -54,6 +54,7 @@ https://github.com/dims/dsx-nvke/tree/integration/control-plane-kata-pods
 - What it is for: one tree to build the agent, the controller, the simulator, the provider and the node image from, with the deploy path and the kind host cluster scripts, for a person who wants to try the feature. It is not for a pull request and not for review.
 - One place differs from the branches: branch 1 and branch 6 each add a field at the end of the same struct in `agent/internal/agent/agent.go`. The integration branch has both fields. The README of the simulator has the lines of branch 3 and of branch 11, and the docs page on infrastructure providers has the lines of branch 7 and of branch 11. Each other file that a branch changes is the same as in that branch.
 - It is built again after each change of a branch, so its history is rewritten. Do not base work on it.
+- The guide for a first run is `try-it.md`, next to this page. It is written for a person outside the team who has only the two public forks. Nothing of it ran from start to end yet, and each step has a mark for what ran.
 - Check at 08:30 on 2026-11-28: `make build` passes for all modules. The tests of the agent module and of the provider module pass, and so do the controller tests of the four packages that branches 5 and 7 change. The CLI test decodes both example requests of branch 11. The deploy list check, the docs check and the workspace check pass.
 - Kata Containers has its own integration branch, because the guest needs two changes of the Kata agent: https://github.com/dims/kata-containers/tree/integration/control-plane-kata-pods (tip `96a8d905b`). It is Kata 4.4.0 plus the commit of branch 10 and a backport of the open upstream pull request 13627 of another author, which lets an exec work after systemd starts in the container.
 
