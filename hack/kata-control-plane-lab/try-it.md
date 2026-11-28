@@ -5,7 +5,7 @@ State of 2026-11-28. The guide uses two public branches:
 - `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `7da67615`
 - `integration/control-plane-kata-pods` of `https://github.com/dims/kata-containers`, at `96a8d905b`
 
-**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Scenario 1, the first cluster, passed too. Each other scenario ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
+**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Scenarios 1 to 3 passed too. Each other scenario ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
 
 ## What the feature is
 
@@ -269,7 +269,7 @@ kc get nodes -o wide
 
 ### Scenario 2, pod traffic between the nodes
 
-**Lab.**
+**Ran in the first run of 2026-11-28.** The block took 10 s. It was the first run with a worker on the one node network.
 
 ```bash
 kc apply -f - <<'EOF'
@@ -306,7 +306,7 @@ done
 
 ### Scenario 3, a lost pod comes back
 
-**Ran.**
+**Ran in the first run of 2026-11-28.** The delete returned after 22 s. The new pod was ready and its node Ready 61 s after the delete.
 
 ```bash
 kh -n podvm-clusters get pods -o wide
