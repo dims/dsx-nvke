@@ -2,9 +2,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Remove what up.sh made: the kind cluster, the loop devices with their files,
-# and the Docker network of the node network. Delete each tenant cluster
-# through the NVKE API first.
+# Remove what up.sh made: the simulator, the kind cluster, the loop devices with
+# their files, and the Docker network of the node network. Delete each tenant
+# cluster through the NVKE API first: a worker container of the simulator goes
+# only that way.
 #
 # The kernel modules and the inotify limit of the step host stay.
 
@@ -16,6 +17,13 @@ NODE_NETWORK=podvm-nodenet
 
 log() { printf '\n=== %s\n' "$*" >&2; }
 as_root() { if [[ "$(id -u)" -eq 0 ]]; then "$@"; else sudo "$@"; fi; }
+
+pid_file="${STATE_DIR}/nico-sim/nico-sim.pid"
+if [[ -s "${pid_file}" ]] && kill -0 "$(cat "${pid_file}")" 2>/dev/null; then
+  log "stopping nico-sim"
+  kill "$(cat "${pid_file}")"
+fi
+rm -f "${pid_file}"
 
 log "deleting the kind cluster ${KIND_CLUSTER_NAME}"
 kind delete cluster --name "${KIND_CLUSTER_NAME}"
