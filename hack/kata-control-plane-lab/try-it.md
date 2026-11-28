@@ -2,7 +2,7 @@
 
 State of 2026-11-28. The guide uses two public branches:
 
-- `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `98c84fac`
+- `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `0ac93949`
 - `integration/control-plane-kata-pods` of `https://github.com/dims/kata-containers`, at `96a8d905b`
 
 **Each step and each scenario of this path passed in the first run of the guide, on 2026-11-28, but not in one pass.** Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). A second pass at the end ran steps 7 to 13 in one go from the public tip, and each passed. Each of the ten scenarios passed. Scenario 6 passed at its second try, on a cluster that was made again: "Known obstacles" has why. The tips moved during the run, as the fixes came in. A run of the whole path in one pass from one tip is still open. A mark on each step and each scenario says how it ran. Expect to find faults, and tell us where.

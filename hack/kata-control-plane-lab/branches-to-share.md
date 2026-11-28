@@ -1,8 +1,8 @@
 # Branches to share: NVKE control plane nodes as Kata pods
 
-Last update: 2026-11-28, 15:19 local time. Each tip in the state table was the tip of its branch on the fork at that time (fetched at 15:19). Branch 8 got four commits at 15:19. Branches 9, 11 and 12 and the integration branch still sit on its tip before them (`08379976`) and move onto the new tip when the work on branch 9 is through.
+Last update: 2026-11-28, 15:24 local time. Each tip in the state table was the tip of its branch on the fork at that time (fetched at 15:24).
 
-This page lists the only branches that the larger team needs. Each of the eleven is meant to become one pull request. No pull request is open yet. A twelfth branch, `feat/podvm-arm64`, holds the fixes for arm64 while the first run on an arm64 machine is in work. Its commits go into branches 9 and 11 when both runs are through. One more branch, `integration/control-plane-kata-pods`, holds the commits of the ten NVKE branches together, for a person who wants to try the feature. It is not for a pull request. Every other branch on the two forks is lab material and is not for sharing.
+This page lists the only branches that the larger team needs. Each of the eleven is meant to become one pull request. No pull request is open yet. A twelfth branch, `feat/podvm-arm64`, held the fixes for arm64 while the first run on an arm64 machine went on. Its commits are in branches 9 and 11 since 2026-11-28, and the branch itself is an old copy. One more branch, `integration/control-plane-kata-pods`, holds the commits of the ten NVKE branches together, for a person who wants to try the feature. It is not for a pull request. Every other branch on the two forks is lab material and is not for sharing.
 
 - NVKE branches are on the fork `dims/dsx-nvke` and go to `dsx-ai-factory/nvke`. All sit on the main commit `d625fcfa`. The fork has one version tag, `v0.24.0-beta.18`, since 2026-11-28. A build of the node agent takes its version from the nearest such tag, and the controller checks that version.
 - The Kata branch is on the fork `dims/kata-containers` and goes to `kata-containers/kata-containers`.
@@ -19,10 +19,10 @@ This page lists the only branches that the larger team needs. Each of the eleven
 | 6 | `feat/agent-endpoint-health-gate` | `543bd409` | 6 | 1,420 added, 6 removed | Ready. In the first run the gate took each node out first in the replace, the rollouts and the encryption change, and no API call failed. The last step of a Kubernetes upgrade (`kubeadm upgrade apply` on one node) had no gate, and 2 of 742 calls failed there. Two new commits of 2026-11-28 close the gate around that step. With them a second run of the upgrade had each call answered on both architectures: 768 of 768 on amd64 and 732 of 732 on arm64 |
 | 7 | `feat/capi-failure-domain-unavailable` | `cdc69b8d` | 1 | 252 added, 21 removed | Ready. The small changes of the fresh review are in since 2026-11-28, 08:28. The rule ran in the first run of the try-out guide on 2026-11-28: two times a control plane node waited in a domain with no room, and each time NVKE made a new node in another domain after about 16 minutes |
 | 8 | `feat/cluster-api-provider-podvm` | `416010dc` | 26 | 11,445 added, 9 removed | Ran on two machines on 2026-11-28, in each scenario of the try-out guide: it made the Service, placed the pods, reported a full failure domain and cleaned up at each delete. No fault showed. One finding of the run is in since 15:19: three more fields of a `PodVMCluster` cannot change now, so no field of its spec can. The CRD rules have their first test |
-| 9 | `feat/podvm-node-image` | `27806a56` | 3, on top of branch 8 | 1,253 added, 2 removed | The image ran in a pod for the first time on 2026-11-28: three control plane nodes of the first cluster of the try-out guide. No fault showed. Still to show in that run: a second start of a pod on its volumes, and the gate in action |
+| 9 | `feat/podvm-node-image` | `86da7dbd` | 9, on top of branch 8 | 1,307 added, 2 removed | The image ran as control plane pods on two machines on 2026-11-28, on amd64 with Cloud Hypervisor and on arm64 with QEMU: a first start, a second start on the volumes with no format, rollouts, encryption, an upgrade, and the gate in action. No fault showed. Six commits of 15:23 bring in the notes of those runs: the README for both architectures, each tool of the kernel build, where the agent version comes from, and the rescan of the node agent turned off in a pod. No pod has run an image of this tip yet: the last run on arm64 does that |
 | 10 | `fix/agent-kill-child-cgroups` (Kata) | `e0f5597` | 1 | 161 added, 6 removed | Ready |
-| 11 | `feat/podvm-deploy-path` | `7c5386d5` | 19, on top of branch 9 | 1,890 added, 2 removed | Ran on two machines on 2026-11-28. On amd64 all 13 set up steps and each of the ten scenarios passed, three set up steps after a small fix of this branch. A second pass then ran steps 7 to 13 in one go from the public tip with no fix, in 549 seconds. On arm64 the 13 steps passed at the first try. The last commit gives the README of the kind host cluster the memory and disk numbers that the run measured |
-| 12 | `feat/podvm-arm64` | `56043234` | 6, on top of branch 11 | 70 added, 15 removed | New on 2026-11-28, and not a branch for a pull request of its own. With it, all 13 set up steps of the guide passed on a real arm64 machine, each at the first try and from the public tip. Scenarios 1 to 5 passed there too, each at the first try: the first cluster (three control plane nodes as Kata pods on QEMU and one worker, each Ready after 3 minutes and 47 seconds), pod traffic, a lost pod, a replace of a node, a rollout to a new image, etcd encryption with a rollout after it, a Kubernetes upgrade, workers from the simulator, and the delete. No fault of the product showed on arm64 that amd64 does not have. The proof of the gate fix passed there too. Open there: the full failure domain scenario, which runs now |
+| 11 | `feat/podvm-deploy-path` | `266d8159` | 23, on top of branch 9 | 1,936 added, 2 removed | Ran on two machines on 2026-11-28. On amd64 all 13 set up steps and each of the ten scenarios passed, three set up steps after a small fix of this branch. A second pass then ran steps 7 to 13 in one go from the public tip with no fix, in 549 seconds. On arm64 the 13 steps passed at the first try. The README of the kind host cluster has the memory and disk numbers that the runs measured. The four commits that arm64 needs are in this branch since 15:23 (QEMU for the runtime class on arm64, a larger `/dev/shm` for a kind node there, and the README for both architectures) |
+| 12 | `feat/podvm-arm64` | `56043234` | 6, on top of the old form of branch 11 | 70 added, 15 removed | No branch for a pull request. It was the holding place for what arm64 needs while the first run on arm64 went on. Since 15:23 on 2026-11-28 its six commits are in branch 9 (two) and in branch 11 (four), with one text corrected: the pages say now that they are tested on both architectures. The branch on the fork holds the old copies and can go when Davanum says so |
 
 "Ready" means that the commits are final in content. After the rework, all branches are built together again and the lab tests run again. This page gets the result.
 
@@ -52,17 +52,17 @@ Before a pull request, each branch still needs these things. They are rules of t
 5. Branch 9 stacks on branch 8.
 6. Branch 10 is for another project and has no order with the rest.
 7. Branch 11 stacks on branch 9 and goes last. Its last commit also needs branch 5 below it.
-8. Branch 12 stacks on branch 11 for now. It is a holding place: four of its commits belong to branch 11 and two to branch 9.
+8. Branch 12 is no part of the order any more. Its commits are in branches 9 and 11.
 
 ## The integration branch
 
 https://github.com/dims/dsx-nvke/tree/integration/control-plane-kata-pods
 
-- What it is: the commits of branches 1 to 7 and of branch 12 (which brings branches 8, 9 and 11), picked in the order above onto the main commit `d625fcfa`. It has no code of its own. Tip `98c84fac`, 69 commits, built again at 14:47 on 2026-11-28 with the new docs commit of branch 11. It differs from the tip before it (`8c957317`, which had the two new commits of branch 6 and which both runs proved the gate fix on) only by the 8 lines of that README change.
+- What it is: the commits of branches 1 to 7 and of branch 11 (which brings branches 8 and 9), picked in the order above onto the main commit `d625fcfa`. It has no code of its own. Tip `0ac93949`, 77 commits, built again at 15:23 on 2026-11-28 from the new tips of branches 8, 9 and 11. Against the tree that both machines tested (the tip `98c84fac` before it) it differs in 12 files, by the same lines as the branches do: the three new rules of the provider with their test, the node image changes, and two text lines of the kind host cluster README. No machine has run this tip yet. The last run on arm64 does that, as one pass of the whole guide.
 - What it is for: one tree to build the agent, the controller, the simulator, the provider and the node image from, with the deploy path and the kind host cluster scripts, for a person who wants to try the feature. It is not for a pull request and not for review.
 - One place differs from the branches: branch 1 and branch 6 each add a field at the end of the same struct in `agent/internal/agent/agent.go`. The integration branch has both fields. The README of the simulator has the lines of branch 3 and of branch 11, and the docs page on infrastructure providers has the lines of branch 7 and of branch 11. Each other file that a branch changes is the same as in that branch.
 - It is built again after each change of a branch, so its history is rewritten. Do not base work on it.
-- The guide for a first run is `try-it.md`, next to this page. It is written for a person outside the team who has only the two public forks. Nothing of it ran from start to end yet, and each step has a mark for what ran.
+- The guide for a first run is `try-it.md`, next to this page. It is written for a person outside the team who has only the two public forks. Each of its steps and scenarios passed on amd64 on 2026-11-28, and nine of ten scenarios on arm64, but not in one pass from one tip. Each step has a mark for how it ran.
 - Check at 12:14 on 2026-11-28: `make build` passes for all modules, the CLI test decodes both example requests of branch 11, and the deploy list, docs, shell lint, license header and name checks pass. The first run of the guide on amd64 cloned this branch with no credentials, built each part from it, and made its first cluster from the tip `e6ff4e4b`. Against that tip the tree of now differs in five files, each for arm64 or for a text.
 - Kata Containers has its own integration branch, because the guest needs two changes of the Kata agent: https://github.com/dims/kata-containers/tree/integration/control-plane-kata-pods (tip `96a8d905b`). It is Kata 4.4.0 plus the commit of branch 10 and a backport of the upstream pull request 13627 of another author (still open on 2026-11-28, as is the upstream issue 14062 for the fault of branch 10), which lets an exec work after systemd starts in the container.
 
@@ -256,17 +256,34 @@ https://github.com/dims/dsx-nvke/tree/feat/podvm-node-image
 
 The branch adds the node image for the pods, inside the provider module at `cluster-api-provider-podvm/node-image/`. The provider of branch 8 cannot be used without it. The branch sits on top of branch 8, and the three commits below are its own.
 
-- `1c921a41` feat(podvm): add the bootstrap program of the node image (286 lines of code, 237 of tests, two units)
+- `53975ca3` feat(podvm): add the bootstrap program of the node image (286 lines of code, 237 of tests, two units)
   - A small program that applies the bootstrap data of NVKE in the pod: it writes the files and runs the commands that a machine would get from cloud-init. Two systemd units run it, one early and one after the network is up. It reads a file mode as cloud-init does and refuses a mode above 0777. On a later start it writes each file again that is not on the `/var` volume, so a file that the image also carries does not go back to the image content after a new pod.
-- `e5a55f74` feat(podvm): add the node image for pod machines (388 lines in 11 files)
+- `f788d1e6` feat(podvm): add the node image for pod machines (388 lines in 11 files)
   - The Dockerfile on top of the container node image of the repository, the build script, the entry point of the pod, the readiness program that the provider's probe runs, the agent flags of branch 6 (they do nothing with a node agent that has no gate), and a check that Open vSwitch uses the datapath of the guest kernel.
   - `format-if-empty`: the entry point makes a filesystem on a volume only when `blkid` finds none and a read of the place of the ext4 superblock succeeds and finds none. Each other answer stops the start. The reason: `blkid` gives the same exit code for "nothing found" and for a read that fails, so its answer alone could erase `/var` or the etcd data after a passing fault.
-- `27806a56` docs(podvm): describe the node image and its guest kernel options (302 lines)
+- `f5ecf114` docs(podvm): describe the node image and its guest kernel options (302 lines)
   - The README with the contract between the provider and the image, the two commands that build the base image with their inputs, the full command that builds the guest kernel with the two fragment files (11 options), how the kernel reaches a host node and how a custom runtime of the `kata-deploy` chart and a RuntimeClass point at it, the two changes of the Kata agent that are in no release, and the chart value for the join token.
+- Six commits of 2026-11-28, from the notes of the two runs:
+  - `7f9d9331` docs(podvm): take the architecture of the machine in the node image builds
+    - The README named `x86_64` for the kernel build and `amd64` for a bundle and two packages. It came from the old holding branch for arm64.
+  - `844d0020` docs(podvm): say on which architecture the node image is tested
+    - Kata 4.4.0 has `clh-runtime-rs` for amd64 only, and its Rust runtime has QEMU on arm64. The README says so, and that the image is tested on amd64 with `clh-runtime-rs` and on arm64 with `qemu-runtime-rs`, and the kernel build on x86_64 and on aarch64. It came from the old holding branch too, with the text on arm64 brought to the tested state.
+  - `ef818e80` docs(podvm): name each tool of the guest kernel build
+    - A C compiler, `make` and `patch` were missing in the list. Step 3 of the guide needed all three on both machines.
+  - `77e33a9a` docs(podvm): say where the base image takes the agent version from
+    - The build names the node agent with `git describe` and the `v*` tags. A clone with no tag gives a bare commit ID, and the etcd encryption change of the controller refuses such a version. The README gives `git fetch --tags` and the command that prints the version of the agent in the image. That was the cause of the first try of scenario 6 that did not pass.
+  - `cacc84c8` feat(podvm): turn the mlx5 rescan of the node agent off in the node image
+    - At its start the node agent can remove the PCI devices of a DPU and scan the bus again, for a machine whose DPU was not up in time. In a pod it logged seven error lines at each start, because `/sys` is read only there. A pod has its interfaces from the CNI before the agent starts and has no PCI device of a DPU, nothing reads the result of the rescan, and the repository already turns it off for its container nodes. So the image passes `--disable-mlx5-rescan`.
+    - The drop-in of the agent flags has a new name, `units/zz-podvm-agent-flags.conf`, because it holds more than the gate flags now. The build keeps it in each case. It takes the three gate flags out when the node agent of the base image has no gate, and it stops at any other flag that the agent does not know.
+  - `86da7dbd` docs(podvm): bring the node image README to the state of the first runs
+    - Three lines said that no test runs the image in a pod, that no test installs Kata, and that arm64 is not tested. The runs made each of them wrong.
+  - Checks at the tip: the tests, `make generate-check` and `make lint` of the module, the repository checks, an image build with no network, the flag step with two real node agents (one with a gate, one without), and `systemd-analyze verify` on the agent unit with the drop-in.
+  - Not proven: the new drop-in in a pod. The check is the line "mlx5 rescan is disabled" in the journal of the node agent and no error line of the rescan. The last run on arm64 has it.
 - Proof so far: the tests of the module pass, with tests for each point of the review, and the author broke the code in nine more ways and a test failed each time. The image builds with no network on top of the base image. The kernel build command of the README ran on the workstation and gave a kernel with the 11 options. That kernel did not boot in a test.
 - Proof in a cluster, 2026-11-28, the first run of the try-out guide (still in work): the image ran as three control plane pods of the first cluster. Both volumes got their filesystem from `format-if-empty`, the two units ran (3 of 3 files written, the status `done`), systemd was up after 5 seconds with no failed unit, `kubeadm init` and two joins passed, the node agent runs with the three gate flags, and the exec readiness probe passes each 2 seconds. No fault showed.
 - Open, in the same run: a second start of a pod on its volumes (no format, the same machine ID), a replace of the first node and of a joined node, a restart in place, and the gate in action. Not run at all: the Kata chart values of the README in the README's own words (the run used the values file of branch 11), a base image with no CNI image package, arm64.
-- A note from that run, not a fault: the node agent tries a rescan of network devices two times at its start and logs seven error lines, because `/sys` is read only in the pod.
+- A note from that run: the node agent tried a rescan of network devices two times at its start and logged seven error lines, because `/sys` is read only in the pod. The commit `cacc84c8` turns the rescan off in the image.
+- Proof in a cluster, 2026-11-28, both runs as a whole: the image ran on amd64 with Cloud Hypervisor and on arm64 with QEMU. A second start of a pod on its volumes showed no format, the same machine ID and `firstStart=false` on both. The replace of a node, the rollouts, etcd encryption and the Kubernetes upgrade passed with it, and the gate file took each node out of the Service first. On arm64 systemd in the guest is `running` with no failed unit, and etcd syncs in 3 to 4 milliseconds on the block volume with direct I/O.
 
 ### 10. `fix/agent-kill-child-cgroups` (Kata Containers)
 
@@ -284,68 +301,74 @@ https://github.com/dims/dsx-nvke/tree/feat/podvm-deploy-path
 
 The branch adds what a person needs, beyond the provider and its node image, to get a cluster with control plane nodes as Kata pods on a kind host cluster, in the forms that the repository already uses. Davanum chose the form on 2026-11-28: a deploy path like the one of the end to end tests. The branch sits on top of branch 9, and the twelve commits below are its own.
 
-- `e2556b16` chore(deploy): copy the capnico-e2e deploy path as podvm-e2e (1,026 lines in 20 files)
+- `a17dbd66` chore(deploy): copy the capnico-e2e deploy path as podvm-e2e (1,026 lines in 20 files)
   - A plain copy of the deploy path `controller/deploy/capnico-e2e/`, with no change. It is apart so that the next commit shows only what differs.
-- `e2b703c0` feat(deploy): set the podvm-e2e deploy path for the pod VM provider (40 added, 17 removed)
+- `5aeda1f5` feat(deploy): set the podvm-e2e deploy path for the pod VM provider (40 added, 17 removed)
   - The controller settings of the path: the provider list has `infra`, the NICo controllers are off, the chart grants the rights for the pod VM kinds, the node identity comes from a join token, a reboot goes straight to the provider, and OIDC is off. One condition of `controller/hack/ci/deploy-stack.sh` changes, so that the script installs this path.
-- `f5483be1` feat(hack): add a kind host cluster for the pod VM provider (220 lines)
+- `5fe9be5a` feat(hack): add a kind host cluster for the pod VM provider (220 lines)
   - `controller/hack/podvm-kind/` with `up.sh`, `down.sh` and a kind config for four nodes. `up.sh` makes the node network and gives each kind node what Kata needs.
-- `7b3c3096` feat(hack): install Kata with the podvm runtime class on the kind host cluster (65 lines)
+- `faf2e9a7` feat(hack): install Kata with the podvm runtime class on the kind host cluster (65 lines)
   - The upstream chart `kata-deploy` with one custom runtime, `kata-podvm`. `up.sh` copies the guest kernel and the guest image into each kind node.
-- `006838bd` feat(hack): install MetalLB on the node network of the kind host cluster (46 lines)
+- `b0efd480` feat(hack): install MetalLB on the node network of the kind host cluster (46 lines)
   - The load balancer for the Service that the provider makes, with its address pool on the node network.
-- `d256a04a` feat(hack): give the kind host cluster block storage (74 lines)
+- `cace77c5` feat(hack): give the kind host cluster block storage (74 lines)
   - The local static provisioner of the Kubernetes storage group in block mode, over loop devices, with a fixed number of volumes on each host node. A released volume is cleaned.
-- `2567975d` feat(hack): start the NICo simulator with its workers on the node network (54 lines)
+- `147695be` feat(hack): start the NICo simulator with its workers on the node network (54 lines)
   - `up.sh sim` starts the simulator. A worker has one network, the node network.
-- `6d9df7e1` docs(hack): describe the run on the kind host cluster (205 lines)
+- `ccb25fae` docs(hack): describe the run on the kind host cluster (205 lines)
   - The README of `controller/hack/podvm-kind/` with the whole run in seven steps, in the order in which a reader runs them: build the guest kernel and the guest image, build the images and `nvkectl`, bring the host cluster up, install Cluster API and the provider, install CAPNICo and start the simulator, install the management plane, create a cluster. Then the clean up and what is not covered. The try-out guide `try-it.md` follows it step by step. Writing that guide showed four gaps in this README, which are closed since 2026-11-28, 08:54.
-- `a6f95216` docs(operate): say how a provider outside the closed set is used (2 lines)
-- `4c3bd70b` docs(nico-sim): describe the attestation method and the reboot setting (6 lines)
-- `d4191076` docs(cli): add an example node pool of nico-mock workers for a pod VM cluster (48 lines)
-- `c39d6323` docs(cli): add an example cluster with control plane nodes as pods (109 lines)
+- `19147e28` docs(operate): say how a provider outside the closed set is used (2 lines)
+- `97874376` docs(nico-sim): describe the attestation method and the reboot setting (6 lines)
+- `d219f6f2` docs(cli): add an example node pool of nico-mock workers for a pod VM cluster (48 lines)
+- `da96f187` docs(cli): add an example cluster with control plane nodes as pods (109 lines)
   - `cli/examples/podvm-cluster.yaml`. It uses the request field of branch 5. So the test that decodes the examples fails for this file on this branch alone and passes with branch 5 below it, as in the integration branch. The pull request of this branch comes after branch 5.
-- `5c01417c` docs(hack): say where the tool versions for the kind host cluster are pinned (3 lines)
+- `dc3d3655` docs(hack): say where the tool versions for the kind host cluster are pinned (3 lines)
   - The README points at `make/tool-versions.mk` and `go.work`. Found by the first run.
-- `bbad1365` fix(hack): name the Cloud Hypervisor shim as the default shim of the Kata install (5 lines)
+- `259d957b` fix(hack): name the Cloud Hypervisor shim as the default shim of the Kata install (5 lines)
   - The values file for the Kata chart turned each shim off but the Cloud Hypervisor one and left the default shim of the chart, which is a QEMU shim. The installer of Kata refuses that, so the step `kata` of `up.sh` failed in the first run. The check is in the installer and not in the chart, so the static render could not show it.
-- `1988a40d` docs(hack): let the reader choose the local port of the API port forward (6 added, 2 removed)
+- `b05ad46a` docs(hack): let the reader choose the local port of the API port forward (6 added, 2 removed)
   - A variable `API_PORT` in the README, because something on the test machine already listened on 8080.
-- `fed42a2a` docs(hack): run install-capnico.sh through bash in the kind host cluster README (2 lines)
+- `6c3a033e` docs(hack): run install-capnico.sh through bash in the kind host cluster README (2 lines)
   - The script has no execute bit in the repository, so the README line stopped with "Permission denied" in the first run. The copy of the CAPNICo source now also stops when the module path is empty.
-- `2777334e` docs(hack): build and load the profiles fixture image for the kind host cluster (README)
+- `1845d583` docs(hack): build and load the profiles fixture image for the kind host cluster (README)
   - The deploy path names an image with the profiles fixture, as the path that it copies does, and the README had no step that builds and loads it. So the controller pod could not start in the first run. The static render could not show it.
-- `8c68658d` docs(hack): say when the kind host cluster README shows the cluster as Provisioned (4 added, 1 removed)
+- `edd4463f` docs(hack): say when the kind host cluster README shows the cluster as Provisioned (4 added, 1 removed)
   - The README said that the status comes when the nodes have joined. In the first run it came with the first control plane node, and the other nodes joined after it.
-- `7c5386d5` docs(hack): give the measured memory and disk needs of the kind host cluster (6 added, 2 removed)
+- `4dc1f142` docs(hack): give the measured memory and disk needs of the kind host cluster (6 added, 2 removed)
   - The README named 20 Gi of memory and no disk number. The first run measured both: 18 Gi above the idle machine for a cluster of three control plane nodes and one worker with the management plane, 25 Gi at the highest point of a rollout with three workers, about 85 G of disk for the builds, the images and one cluster, and about 12 G in the four kind nodes for each more node image.
-- Proof by static checks: the repository checks passed at the tip `2777334e`, and the docs check and the name check at `8c68658d` (deploy lists, license headers, names, internal config, docs, shell lint, workflows), the controller chart renders with the settings of the path and differs from the render of `capnico-e2e` only in the four intended points, the deploy executor walks the ten items of the path in a dry run, and the Kata chart of 4.4.0 renders the custom runtime. The charts of MetalLB and of the storage provisioner were not rendered.
-- Proof by the first run, 2026-11-28, its first part: all 13 set up steps of the guide passed on one test machine, from a clone of the public integration branch with no credentials. That covers the whole README of this branch up to the first cluster request, `up.sh` with each of its eight steps, and the deploy path `podvm-e2e` through `deploy-stack.sh`. These ran for the first time and passed: the guest image build from the make target of Kata, a pod on that guest image and on the guest kernel of branch 9, the custom runtime of the Kata chart, the storage provisioner on loop devices, the provider installed from the source tree, CAPNICo built from its public source, the simulator as a process on the machine, `deploy-stack.sh` outside its test runner, and `nvkectl` against the API with authentication on. Three steps passed only after a fix of this branch (the commits `bbad1365`, `fed42a2a` and `2777334e`). `up.sh` ran in two parts, and one clean pass of the whole script comes at the end of the run.
+- Four commits that arm64 needs, from the old holding branch, in this branch since 15:23 on 2026-11-28. Section 12 has what each one does.
+  - `e88e9a85` docs(hack): build and load images for the architecture of the machine
+  - `961c1d81` feat(hack): put the kata-podvm runtime on QEMU on arm64
+  - `e222775a` fix(hack): give a kind node on arm64 a /dev/shm for QEMU guests
+  - `266d8159` docs(hack): say on which architecture the kind host cluster is tested
+    - The README says now that the page is tested on amd64 and on arm64.
+- Proof by static checks: the repository checks passed at the tip `1845d583`, and the docs check and the name check at `edd4463f` (deploy lists, license headers, names, internal config, docs, shell lint, workflows), the controller chart renders with the settings of the path and differs from the render of `capnico-e2e` only in the four intended points, the deploy executor walks the ten items of the path in a dry run, and the Kata chart of 4.4.0 renders the custom runtime. The charts of MetalLB and of the storage provisioner were not rendered.
+- Proof by the first run, 2026-11-28, its first part: all 13 set up steps of the guide passed on one test machine, from a clone of the public integration branch with no credentials. That covers the whole README of this branch up to the first cluster request, `up.sh` with each of its eight steps, and the deploy path `podvm-e2e` through `deploy-stack.sh`. These ran for the first time and passed: the guest image build from the make target of Kata, a pod on that guest image and on the guest kernel of branch 9, the custom runtime of the Kata chart, the storage provisioner on loop devices, the provider installed from the source tree, CAPNICo built from its public source, the simulator as a process on the machine, `deploy-stack.sh` outside its test runner, and `nvkectl` against the API with authentication on. Three steps passed only after a fix of this branch (the commits `259d957b`, `6c3a033e` and `1845d583`). `up.sh` ran in two parts, and one clean pass of the whole script comes at the end of the run.
 - The first cluster request of the guide passed in that run, from the public tip with no local patch: `nvkectl create cluster` with the example of this branch gave three control plane nodes and one worker, each Ready after 5 minutes and 37 seconds. The Service that the provider makes had its address after 11 seconds. MetalLB announces the address on the node network. The worker of the simulator has one network. Each control plane node pulled images from a public registry by itself.
 - Open, in the same run: the other nine scenarios, the clean up with a check for loop devices that stay, and one clean pass of steps 7 to 13 from the public tip in one go.
 - Open, for the product: with OIDC on, the provider needs the SPIFFE program and socket in its pod to reach a cluster, as the Cluster API controllers get them from `controller/deploy/k8s/capi-spiffe-exec-auth`. The path turns OIDC off, as the lab did. The provider is not an item of the path: it installs with `kubectl apply -k` before it, because no image of the provider is published. No CI lane uses the path yet.
 
 - Proof by the first run, 2026-11-28, the whole: on amd64 each of the 13 set up steps and each of the 10 scenarios of the guide passed (`results/first-run.md`). Steps 7, 11 and 12 passed in the first pass after a fix of this branch. A second pass then ran steps 7 to 13 in one go from a clean clone of the public tip, in 549 seconds, with a script that stops at the first failed step: `up.sh` with no argument 189 s, the Kata check 8 s, the image load 145 s, Cluster API and the provider 17 s, CAPNICo and the simulator 72 s, the deploy path 115 s, `nvkectl` 3 s. The clean up passed two times: `down.sh` took 10 seconds and left no kind cluster, no network of the run, no loop device and no volume file. On arm64 the 13 steps passed at the first try (`results/first-run-arm64.md`). Not run: the whole path in one pass from one tip, and a CI lane.
 
-### 12. `feat/podvm-arm64`
+### 12. `feat/podvm-arm64` (its commits are in branches 9 and 11)
 
 https://github.com/dims/dsx-nvke/tree/feat/podvm-arm64
 
-The branch holds what arm64 needs, on top of branch 11. Nobody ran any part of this work on arm64 before 2026-11-28. A reading of the tree and of Kata Containers 4.4.0 showed seven places that assume amd64, and one of them is large: Kata 4.4.0 has Cloud Hypervisor with its Rust runtime for amd64 only, so on arm64 the runtime class sits on QEMU, which no test of this work ran before. Cloud Hypervisor stays on amd64, where each result so far is.
+The branch held what arm64 needs while the first run on arm64 went on. Since 15:23 on 2026-11-28 its six commits are in branch 9 (the two on the node image README) and in branch 11 (the four on the kind host cluster). The list below has their IDs in those branches. The branch on the fork still holds the old copies, and it can go when Davanum says so. This section stays as the record of the arm64 work and of its run. Nobody ran any part of this work on arm64 before 2026-11-28. A reading of the tree and of Kata Containers 4.4.0 showed seven places that assume amd64, and one of them is large: Kata 4.4.0 has Cloud Hypervisor with its Rust runtime for amd64 only, so on arm64 the runtime class sits on QEMU, which no test of this work ran before. Cloud Hypervisor stays on amd64, where each result so far is.
 
 Each commit keeps what a reader on amd64 gets: the commands print and select the same on amd64 as before, and the Kata chart renders byte for byte the same with the amd64 values.
 
-- `22260cfc` docs(hack): build and load images for the architecture of the machine
+- `e88e9a85` docs(hack): build and load images for the architecture of the machine
   - The README of the kind host cluster built the controller image and the provider image for `linux/amd64` and loaded images for that platform. On arm64 two of these would build an amd64 image with no error. Now the platform is the one of the machine.
-- `bc7264d5` feat(hack): put the kata-podvm runtime on QEMU on arm64
+- `961c1d81` feat(hack): put the kata-podvm runtime on QEMU on arm64
   - A second values file for the Kata chart, which `up.sh` adds on arm64: the QEMU shim of the Rust runtime in the place of the Cloud Hypervisor one, with the same guest kernel, guest image and block device setting. The runtime class keeps its name, `kata-podvm`.
-- `3b91f3e3` fix(hack): give a kind node on arm64 a /dev/shm for QEMU guests
+- `e222775a` fix(hack): give a kind node on arm64 a /dev/shm for QEMU guests
   - Under QEMU the memory of each guest is a file in `/dev/shm`, and Docker gives a container 64 MB there. On arm64 `up.sh` sets the limit to half of the memory, as a Linux machine has it. A kind node on amd64 stays as it was.
-- `e07c3aee` docs(podvm): take the architecture of the machine in the node image builds
+- `7f9d9331` docs(podvm): take the architecture of the machine in the node image builds
   - The README of the node image named `x86_64` for the kernel build and `amd64` for a bundle and two packages. Its home is branch 9.
-- `00e165d8` docs(hack): say on which architecture the kind host cluster is tested
-- `56043234` docs(podvm): say on which architecture the node image is tested
-  - Both texts say: tested on amd64, and on arm64 the first run is in work. The home of the second is branch 9.
+- `266d8159` docs(hack): say on which architecture the kind host cluster is tested
+- `844d0020` docs(podvm): say on which architecture the node image is tested
+  - Both texts say now: tested on amd64 and on arm64. The first is in branch 11, the second in branch 9.
 - Proof so far: checks on the workstation only, with no pull and no cluster. The repository checks pass at the tip.
 - Proof on arm64 so far, 2026-11-28, on a real arm64 machine with KVM, from a clone of the public integration branch with no credentials: steps 1 to 8 of the guide passed, each as written and at the first try. A container reaches the internet with no firewall rule of ours. The guest kernel builds with all 11 options, and the guest image builds with the Kata agent of the Kata integration branch, each for the first time on arm64. Each image is for `linux/arm64`, and the node agent names a version. `up.sh` ran in one go: the installer of Kata accepted the two values files, and each kind node has the larger `/dev/shm`. The first Kata pod on arm64 ran on QEMU with the Rust runtime: the guest kernel 6.18.62 in the pod, an exec in 0.3 s, a pod delete in 1.5 s.
 - What `/dev/shm` takes under QEMU, measured there: a pod takes memory there as its guest touches it, 395 MB for a pod of 6Gi at its start and at most the size of the guest. It is given back when the pod is gone. With the 64 MB of Docker not even a small pod could start.
