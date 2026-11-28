@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -106,6 +107,7 @@ type AgentConfig struct {
 	DSXIdentityTimeout       time.Duration
 	ControllerClientCABundle string
 	ControllerAudience       string
+	ControlPlaneEndpointGate server.ControlPlaneEndpointGate
 }
 
 // validateAuthConfig rejects authentication settings that cannot work, so a
@@ -157,6 +159,46 @@ func validateAuthConfig(cfg AgentConfig) error {
 		return fmt.Errorf("--grpc-auth-mode must be %q or %q, got %q",
 			authModeSPIFFEMTLS, authModeTLSJWT, cfg.GRPCAuthMode)
 	}
+}
+
+// registerControlPlaneEndpointGateFlags registers the flags of the control plane
+// endpoint gate. The function it returns reads them once fs is parsed.
+func registerControlPlaneEndpointGateFlags(fs *flag.FlagSet) func() server.ControlPlaneEndpointGate {
+	file := fs.String("control-plane-endpoint-gate-file", "",
+		"Absolute path of the control plane endpoint gate file. Before an operation that withdraws this control plane node, "+
+			"the agent creates the file so that the health check of a load balancer the node does not run fails for this node, "+
+			"and it removes the file afterwards. Requires --control-plane-endpoint-backend-interface. Empty means no gate")
+	backendInterface := fs.String("control-plane-endpoint-backend-interface", "",
+		"Interface on which the connections of the load balancer arrive. After the gate closes, the agent closes the established "+
+			"connections of remote clients on the IPv4 address of this interface and port 6443, and checks that no new one arrives. "+
+			"Example: eth0")
+	settle := fs.Duration("control-plane-endpoint-gate-settle", 10*time.Second,
+		"Time the agent waits after it closes the gate and before it closes the established connections, "+
+			"so the load balancer can stop sending new connections to this node")
+	return func() server.ControlPlaneEndpointGate {
+		return server.ControlPlaneEndpointGate{File: strings.TrimSpace(*file), BackendInterface: strings.TrimSpace(*backendInterface), Settle: *settle}
+	}
+}
+
+// validateEndpointGateConfig rejects gate settings that cannot work, for the
+// reason validateAuthConfig exists: a half configured gate would otherwise fail
+// each withdrawal, at the moment an operation is about to start.
+func validateEndpointGateConfig(gate server.ControlPlaneEndpointGate) error {
+	switch {
+	case gate.Settle < 0:
+		return errors.New("--control-plane-endpoint-gate-settle must not be negative")
+	case gate.File == "" && gate.BackendInterface != "":
+		return errors.New("--control-plane-endpoint-backend-interface requires --control-plane-endpoint-gate-file")
+	case gate.File == "":
+		return nil
+	case !filepath.IsAbs(gate.File):
+		// The health check has to mean the same file whatever directory the agent starts in.
+		return fmt.Errorf("--control-plane-endpoint-gate-file must be an absolute path, got %q", gate.File)
+	case gate.BackendInterface == "":
+		// The agent could close the gate, but not the connections, and it could not verify the quiet window.
+		return errors.New("--control-plane-endpoint-gate-file requires --control-plane-endpoint-backend-interface")
+	}
+	return nil
 }
 
 func Bootstrap(kubeVersion string) error {
@@ -446,6 +488,7 @@ func initializeNodeServer(cfg AgentConfig) *server.NodeAgentServer {
 	agentServer.ScriptExecutionLogger = cfg.ScriptExecutionLogger
 	// The SPIRE RPCs read SVIDs from the socket whether or not the gRPC server uses mTLS.
 	agentServer.SPIFFESocketPath = cfg.SPIFFESocketPath
+	agentServer.ControlPlaneEndpointGate = cfg.ControlPlaneEndpointGate
 	agentServer.NodeStatus.ListenStatus = "pending"
 	if err := agentServer.Persister.Persist(agentServer.NodeStatus); err != nil {
 		slog.Error("failed to persist initial status", "err", err)
@@ -568,6 +611,7 @@ func main() {
 		"OCI registry prefix for CNI component images (e.g. registry.example.com/nvke). When set, passed to the CNI helm chart as --set global.registry=<value>. Also set via NKE_CNI_IMAGE_REGISTRY",
 	)
 	controllerAudience := flag.String("controller-audience", tlsjwt.LegacyControllerAudience, "JWT audience: select nvke-controller once the controller accepts the renamed contract")
+	endpointGate := registerControlPlaneEndpointGateFlags(flag.CommandLine)
 	flag.Parse()
 
 	if *versionFlag {
@@ -608,10 +652,15 @@ func main() {
 		DSXIdentityTimeout:       *dsxIdentityTimeout,
 		ControllerClientCABundle: *controllerClientCABundle,
 		ControllerAudience:       *controllerAudience,
+		ControlPlaneEndpointGate: endpointGate(),
 	}
 
 	if err := validateAuthConfig(cfg); err != nil {
 		slog.Error("invalid authentication configuration", "err", err)
+		os.Exit(1)
+	}
+	if err := validateEndpointGateConfig(cfg.ControlPlaneEndpointGate); err != nil {
+		slog.Error("invalid control plane endpoint gate configuration", "err", err)
 		os.Exit(1)
 	}
 
