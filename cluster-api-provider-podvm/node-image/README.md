@@ -94,7 +94,7 @@ host cluster, and name it in `spec.template.spec.image` of the
 | `format-if-empty` | It makes ext4 on a volume device, and only when the device proves to be empty | Contract |
 | `bootstrap/`, `units/podvm-bootstrap*.service` | The program `podvm-bootstrap` and its two units apply the bootstrap data | Contract |
 | `podvm-endpoint-ready` | The program of the readiness probe | Contract |
-| `units/zz-podvm-endpoint-gate.conf` | Three health gate flags for the node agent | Contract |
+| `units/zz-podvm-agent-flags.conf` | The flags of the node agent: no mlx5 rescan, and three health gate flags | Contract |
 | `Dockerfile` | `/etc/default/nvke-agent` is a link into the `/var` volume, so the agent settings stay through a new pod | Contract |
 | `Dockerfile` | `/var/lib/dbus/machine-id` is a link to `/etc/machine-id` | Correction of the base image |
 | `ovs-datapath-check`, `units/zz-podvm-builtin-datapath.conf` | The start step of Open vSwitch accepts a datapath that is built into the kernel | Correction of the base image |
@@ -140,7 +140,23 @@ How the bootstrap data is applied:
 - No command runs a second time for a Machine. The commands stop at the first
   one that fails, where cloud-init goes on with the next one.
 
-## The health gate flags
+## The flags of the node agent
+
+The bootstrap data replaces the agent arguments of the base image. So the
+drop-in `units/zz-podvm-agent-flags.conf` gives the node agent the flags of
+this image.
+
+### No mlx5 rescan
+
+`--disable-mlx5-rescan` turns the rescan of the node agent off. At its start
+the agent can remove the PCI devices of a DPU and scan the bus again. It does
+that only on a machine with no network interface but loopback, whose DPU was
+not up in time. A pod has its interfaces from the CNI before the agent starts,
+and it has no PCI device of a DPU, so a node in a pod never needs the rescan.
+Without the flag the agent tries it two times at each start and logs errors,
+because `/sys` is read only in the pod.
+
+### The health gate
 
 The Service of the shared control plane endpoint sends traffic to each ready
 pod. Before an operation that stops the API server or etcd of a node, the node
@@ -153,12 +169,12 @@ node agent for that:
 | `--control-plane-endpoint-backend-interface` | `eth0` | The connections of the Service arrive on the pod network interface. The agent closes them and checks that no new one arrives |
 | `--control-plane-endpoint-gate-settle` | `15s` | The agent waits this time before it closes the connections. The readiness probe of the provider needs up to 9 s to take a pod out, and the Service then drops the endpoint. 15 s leaves room for both |
 
-The flags do nothing with a node agent that has no endpoint gate. Such an agent
-does not know them, and an agent stops at a flag that it does not know. So the
-build keeps the drop-in only when the node agent of the base image knows the
-three flags, and prints a notice when it removes the drop-in. The image then has
-no gate: the readiness probe follows `/readyz` only, and a node leaves the
-Service when its API server stops and not before.
+The three flags do nothing with a node agent that has no endpoint gate. Such an
+agent does not know them, and an agent stops at a flag that it does not know.
+So the build takes the three flags out of the drop-in when the node agent of
+the base image does not know them, and prints a notice. The image then has no
+gate: the readiness probe follows `/readyz` only, and a node leaves the Service
+when its API server stops and not before.
 
 ## What the host cluster and Kata must give
 
@@ -284,7 +300,4 @@ two changes for that. Neither is in a release of Kata Containers.
 - The join token of a node works one time. A node that is down for longer than
   the life of its SPIRE identity cannot get a new identity.
 - The entry point needs both volume devices, also for a worker.
-- The bootstrap data replaces the agent arguments of the base image, with its
-  flag `--disable-mlx5-rescan`. In a Kata guest the rescan sees only the
-  devices of the guest.
 - Not tested: arm64, IPv6, another hypervisor, and a runtime that is not Kata.
