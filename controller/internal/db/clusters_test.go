@@ -774,3 +774,56 @@ func TestClusterHasStableControlPlaneEndpoint(t *testing.T) {
 		})
 	}
 }
+
+// The endpoint is given once, at creation. It must come back from a read and
+// stay in the row through a later update of the cluster. A cluster without one
+// stores NULL, the value every cluster from before the column has.
+func TestClusterControlPlaneEndpointIsStored(t *testing.T) {
+	tests := []struct {
+		name         string
+		endpoint     string
+		wantNullRows int64
+	}{
+		{
+			name:     "an endpoint with a port",
+			endpoint: "172.18.255.200:6443",
+		},
+		{
+			name:     "a DNS name without a port",
+			endpoint: "lb.example.com",
+		},
+		{
+			name:         "no endpoint",
+			endpoint:     "",
+			wantNullRows: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			bunDB := testutil.SetupDB(ctx, t, (*db.Cluster)(nil), (*db.ControlPlaneConfiguration)(nil))
+			q := db.NewDB(bunDB)
+
+			cluster := newValidCluster()
+			cluster.ControlPlaneEndpoint = tt.endpoint
+			created, err := q.CreateCluster(ctx, &cluster)
+			require.NoError(t, err)
+
+			stored, err := q.GetCluster(ctx, created.ID)
+			require.NoError(t, err)
+			assert.Equal(t, tt.endpoint, stored.ControlPlaneEndpoint)
+
+			stored.KubernetesVersion = "1.30"
+			_, err = q.UpdateCluster(ctx, &stored)
+			require.NoError(t, err)
+			updated, err := q.GetCluster(ctx, created.ID)
+			require.NoError(t, err)
+			assert.Equal(t, tt.endpoint, updated.ControlPlaneEndpoint)
+
+			nullRows, err := bunDB.NewSelect().TableExpr("clusters").Where("control_plane_endpoint IS NULL").Count(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantNullRows, nullRows)
+		})
+	}
+}
