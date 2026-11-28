@@ -19,6 +19,7 @@
 #   multus     Multus, and the pod namespace with its network attachment
 #   kata       Kata Containers with the runtime class kata-podvm
 #   metallb    MetalLB with a pool on the node network
+#   storage    loop devices and the local static provisioner in block mode
 #
 # Not in the default run:
 #   env        print the settings that deploy-stack.sh needs for this cluster
@@ -36,11 +37,15 @@ STATE_DIR="${PODVM_KIND_STATE_DIR:-${XDG_STATE_HOME:-${HOME}/.local/state}/podvm
 # The directory with vmlinux and kata-containers.img, which README.md builds.
 KATA_GUEST_DIR="${KATA_GUEST_DIR:-${STATE_DIR}/kata-guest}"
 POD_NAMESPACE="${POD_NAMESPACE:-podvm-clusters}"
+# Volume places on each kind worker. One machine of the provider takes one
+# place: a volume of 20G and one of 8G. Two leave room to replace a node.
+PLACES_PER_NODE="${PLACES_PER_NODE:-2}"
 
 KATA_VERSION="${KATA_VERSION:-4.4.0}"
 METALLB_VERSION="${METALLB_VERSION:-0.16.2}"
 MULTUS_VERSION="${MULTUS_VERSION:-v4.3.2}"
 CNI_PLUGINS_VERSION="${CNI_PLUGINS_VERSION:-v1.10.0}"
+LOCAL_STATIC_PROVISIONER_VERSION="${LOCAL_STATIC_PROVISIONER_VERSION:-2.10.0}"
 
 # The node network. metallb.yaml and the example requests name addresses of
 # this subnet, so a change here is a change there. Docker gives out the first
@@ -56,6 +61,7 @@ die() { printf 'podvm-kind: %s\n' "$*" >&2; exit 1; }
 as_root() { if [[ "$(id -u)" -eq 0 ]]; then "$@"; else sudo "$@"; fi; }
 k() { kubectl --context "kind-${KIND_CLUSTER_NAME}" "$@"; }
 nodes() { kind get nodes --name "${KIND_CLUSTER_NAME}"; }
+workers() { nodes | grep -v -- '-control-plane$'; }
 
 step_host() {
   [[ -e /dev/kvm ]] || die "no /dev/kvm: Kata needs KVM, and in a virtual machine nested virtualization"
@@ -181,6 +187,37 @@ step_metallb() {
   die "MetalLB did not take ${HERE}/metallb.yaml"
 }
 
+# One sparse file and one loop device for each volume, with direct I/O, and in
+# the kind worker a link to the device. The provisioner makes one volume of
+# each link.
+step_storage() {
+  local node place spec name size file dev majmin
+  mkdir -p "${STATE_DIR}/disks"
+  for node in $(workers); do
+    log "${node}: ${PLACES_PER_NODE} volume places"
+    docker exec "${node}" mkdir -p /mnt/podvm-disks
+    for place in $(seq 0 $((PLACES_PER_NODE - 1))); do
+      for spec in var:20G etcd:8G; do
+        name="${spec%%:*}-${place}"
+        size="${spec##*:}"
+        file="${STATE_DIR}/disks/${node}-${name}.img"
+        [[ -f "${file}" ]] || truncate -s "${size}" "${file}"
+        dev="$(as_root losetup --noheadings --output NAME --associated "${file}" | head -n 1)"
+        [[ -n "${dev}" ]] || dev="$(as_root losetup --find --show --direct-io=on "${file}")"
+        majmin="$(cat "/sys/block/${dev##*/}/dev")"
+        docker exec "${node}" sh -c "[ -e ${dev} ] || mknod -m 660 ${dev} b ${majmin%%:*} ${majmin##*:}"
+        docker exec "${node}" ln -sfn "${dev}" "/mnt/podvm-disks/${name}"
+      done
+    done
+  done
+  log "local static provisioner ${LOCAL_STATIC_PROVISIONER_VERSION}"
+  helm --kube-context "kind-${KIND_CLUSTER_NAME}" upgrade --install local-static-provisioner local-static-provisioner \
+    --repo https://kubernetes-sigs.github.io/sig-storage-local-static-provisioner \
+    --version "${LOCAL_STATIC_PROVISIONER_VERSION}" \
+    --namespace local-static-provisioner --create-namespace \
+    --values "${HERE}/local-static-provisioner-values.yaml" --wait --timeout 5m
+}
+
 # The address of the control plane node of the host cluster on the node
 # network. A node of a tenant cluster reaches the SPIRE server there.
 step_env() {
@@ -199,11 +236,11 @@ EOF
 }
 
 if [[ $# -eq 0 ]]; then
-  set -- host network cluster nodes multus kata metallb
+  set -- host network cluster nodes multus kata metallb storage
 fi
 for step in "$@"; do
   case "${step}" in
-    host | network | cluster | nodes | multus | kata | metallb | env) "step_${step}" ;;
+    host | network | cluster | nodes | multus | kata | metallb | storage | env) "step_${step}" ;;
     *) die "unknown step ${step}: see the header of $0" ;;
   esac
 done
