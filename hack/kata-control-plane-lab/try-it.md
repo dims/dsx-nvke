@@ -17,7 +17,7 @@ State of 2026-11-28. The guide uses two public branches:
 
 ## What you need
 
-- One Linux machine on amd64 or arm64 with `/dev/kvm`. In a virtual machine, nested virtualization must be on. Each step is tested on amd64. On arm64 the first run is in work, and "On arm64" has its state.
+- One Linux machine on amd64 or arm64 with `/dev/kvm`. In a virtual machine, nested virtualization must be on. Each step and each scenario passed on amd64 and on arm64, and "On arm64" has what differs there.
 - 16 CPUs, 48 GB of memory and 130 GB of free disk. The first run, on a machine with 64 CPUs, measured both. Memory: 18 GB for Part 1 with a cluster of three control plane nodes and one worker, and 25 GB at the highest point, a rollout with three workers. Disk: about 85 GB for Part 1 and the first cluster, and about 110 GB at the fullest, with the second image pair of scenario 8 and the workers of scenario 9. A smaller machine never ran.
 - `sudo` rights, for `modprobe`, `sysctl` and `losetup`.
 - Docker 28 or newer with `buildx`. A container must reach the internet. The user of the run must be able to call `docker` with no `sudo`.
@@ -27,14 +27,14 @@ State of 2026-11-28. The guide uses two public branches:
 
 ## On arm64
 
-State of 2026-11-28. A first run is in work, on one arm64 machine with `/dev/kvm`. The last line of this section names the steps that passed there.
+State of 2026-11-28. A first run is at its end, on one arm64 machine with `/dev/kvm`. Each step and each scenario passed there, but not in one pass: the scenarios ran over two clusters. The last two lines of this section have the numbers.
 
 - The commands are the same on both architectures. The README and the scripts take the architecture from the machine.
 - The hypervisor differs. Kata Containers 4.4.0 has Cloud Hypervisor with its Rust runtime for amd64 only. On arm64 `up.sh` puts the runtime class `kata-podvm` on QEMU with the same Rust runtime. The guest kernel, the guest image and the name of the runtime class are the same.
 - On arm64 `up.sh` also gives each kind node a larger `/dev/shm`. QEMU keeps the memory of a guest there, and a container has 64 MB of it.
 - Each mark, each time and each number of this guide is from amd64.
 - Steps that passed on arm64: 1 to 13, each as it is written here, on 2026-11-28. The guest kernel of step 3 has the same file name there. Step 4 took 11 minutes, and the base image of step 5 has 1.1 GB. The pod of step 8 runs on QEMU and prints the same kernel version.
-- Scenarios that passed on arm64: 1, 2, 3, 4, 5, 6, 8, 9 and 10, on 2026-11-28. The status was `Provisioned` after 2 minutes and 26 seconds, and each of the four nodes was Ready after 3 minutes and 47 seconds. In scenario 3 the node was Ready again after 55 seconds. The rollout of scenario 5 took 8 minutes and 46 seconds, with no failed call. In scenario 6 the change took 6 minutes and 54 seconds and the rollout after it 7 minutes and 43 seconds, with no failed call. Scenario 8 ran two times. The first time it ran one state before the one that this guide names, without the fix of the gate around the last upgrade step: the upgrade took 8 minutes and 36 seconds, and 1 of 481 calls failed in that step. The second time it ran with the fix, on a cluster that was made again: the upgrade took 13 minutes and 13 seconds, and each of the 732 calls had an answer. The fix adds 45 seconds to the step, and the other minutes are waits of new nodes for their pod network. In scenario 9 the two new workers took 73 seconds, a delete with a new worker 67 seconds and a reboot 16 seconds. The delete of scenario 10 took 61 seconds. Scenario 7 did not run there yet.
+- Scenarios that passed on arm64: 1 to 10, on 2026-11-28. The status was `Provisioned` after 2 minutes and 26 seconds, and each of the four nodes was Ready after 3 minutes and 47 seconds. In scenario 3 the node was Ready again after 55 seconds. The rollout of scenario 5 took 8 minutes and 46 seconds, with no failed call. In scenario 6 the change took 6 minutes and 54 seconds and the rollout after it 7 minutes and 43 seconds, with no failed call. Scenario 8 ran two times. The first time it ran one state before the one that this guide names, without the fix of the gate around the last upgrade step: the upgrade took 8 minutes and 36 seconds, and 1 of 481 calls failed in that step. The second time it ran with the fix, on a cluster that was made again: the upgrade took 13 minutes and 13 seconds, and each of the 732 calls had an answer. The fix adds 45 seconds to the step, and the other minutes are waits of new nodes for their pod network. In scenario 9 the two new workers took 73 seconds, a delete with a new worker 67 seconds and a reboot 16 seconds. Scenario 7 took 40 minutes and 31 seconds, with two waits of 16 minutes, and each of the 2200 calls had an answer. The delete of scenario 10 took 61 seconds, and 58 seconds right after scenario 7. The clean up left no cluster, no container, no network and no loop device of the run.
 
 ## The marks
 
@@ -438,7 +438,7 @@ Run this scenario last before the delete. After it NVKE avoids each kind worker 
 Each kind worker has two volume places, and a control plane node holds one. Check with `kh -n podvm-clusters get pods -o wide` that `podvm-worker` runs one control plane pod. Give the node image that the control plane runs a second name, take the second place of `podvm-worker`, then roll the control plane to the second name:
 
 ```bash
-NOW=$(kh -n podvm-clusters get pods -o jsonpath='{.items[0].spec.containers[0].image}' | sed 's#.*/##')
+NOW=$(kh -n podvm-clusters get pods -l cluster.x-k8s.io/control-plane -o jsonpath='{.items[0].spec.containers[0].image}' | sed 's#.*/##')
 docker tag $NOW $NOW-x && load $NOW-x
 kh -n podvm-clusters apply -f - <<'EOF'
 apiVersion: v1
