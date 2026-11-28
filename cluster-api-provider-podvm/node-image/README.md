@@ -56,6 +56,22 @@ shorter form for a developer machine. The target does not name the variable.
 `make` gives it to `build-image.sh` through the environment, from the command
 line or from the environment of `make`.
 
+One input is not on the command lines: the version of the node agent.
+`build-image.sh` takes it from `git describe --tags --always --dirty --match 'v*'`
+of the tree. A clone with no version tag gives a bare commit ID there. The NVKE
+controller reads the agent version before some changes, and it refuses a
+version that it cannot read: the change that turns etcd encryption on needs
+0.1.26 or newer. So the clone needs its version tags and the commits back to
+the newest one, which a shallow clone does not have. Fetch the tags before the
+build, and check the version in the image after it:
+
+```bash
+git fetch --tags
+docker run --rm --entrypoint /usr/local/bin/nvke-agent cwe-capd-kindest-node:local --version
+```
+
+A good version starts with `v` and a release number. A bare commit ID does not.
+
 ### This image
 
 The base image must be in the local image store.
