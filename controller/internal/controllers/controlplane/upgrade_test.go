@@ -95,8 +95,13 @@ func TestIsControlPlaneHealthy_WithSurgeThreshold(t *testing.T) {
 
 func TestReconcileNodesNeedingRolloutWithoutControlPlaneVIP(t *testing.T) {
 	t.Parallel()
-	for _, allow := range []bool{false, true} {
-		t.Run(fmt.Sprintf("override=%t", allow), func(t *testing.T) {
+	for _, tc := range []struct {
+		override bool
+		endpoint string
+	}{{}, {override: true}, {endpoint: "lb.example.com:6443"}} {
+		// The surge starts with the override or with a controlPlaneEndpoint.
+		allow := tc.override || tc.endpoint != ""
+		t.Run(fmt.Sprintf("override=%t endpoint=%s", tc.override, tc.endpoint), func(t *testing.T) {
 			t.Parallel()
 			clusterID := uuid.New()
 			oldConfigID := uuid.New()
@@ -114,6 +119,7 @@ func TestReconcileNodesNeedingRolloutWithoutControlPlaneVIP(t *testing.T) {
 					DesiredCount:           1,
 					MaxSurge:               1,
 				},
+				ControlPlaneEndpoint: tc.endpoint,
 			}
 			node := db.Node{
 				ID:                          uuid.New(),
@@ -134,7 +140,7 @@ func TestReconcileNodesNeedingRolloutWithoutControlPlaneVIP(t *testing.T) {
 			if allow {
 				mockTx.On("ListClusterNodeNames", mock.Anything, clusterID).Return([]string{}, surgeError).Once()
 			}
-			r := &reconciler{cfg: config.Config{AllowControlPlaneWithoutVIP: allow}, db: mockTx, logger: slog.Default()}
+			r := &reconciler{cfg: config.Config{AllowControlPlaneWithoutVIP: tc.override}, db: mockTx, logger: slog.Default()}
 
 			_, err := r.reconcileNodesNeedingRollout(context.Background(), cluster, cp, domainAllocator{}, nil)
 

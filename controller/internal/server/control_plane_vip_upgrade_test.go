@@ -20,8 +20,13 @@ import (
 )
 
 func TestClusterService_UpdateCluster_UpgradeWithoutVIP(t *testing.T) {
-	for _, allow := range []bool{false, true} {
-		t.Run(fmt.Sprintf("override=%t", allow), func(t *testing.T) {
+	for _, tc := range []struct {
+		override bool
+		endpoint string
+	}{{}, {override: true}, {endpoint: "lb.example.com:6443"}} {
+		// The upgrade is accepted with the override or with a controlPlaneEndpoint.
+		allow := tc.override || tc.endpoint != ""
+		t.Run(fmt.Sprintf("override=%t endpoint=%s", tc.override, tc.endpoint), func(t *testing.T) {
 			clusterID := uuid.New()
 			oldConfigID := uuid.New()
 			newConfigID := uuid.New()
@@ -44,6 +49,7 @@ func TestClusterService_UpdateCluster_UpgradeWithoutVIP(t *testing.T) {
 					MaxSurge:               1,
 					ControlPlaneConfigSpec: currentSpec,
 				},
+				ControlPlaneEndpoint: tc.endpoint,
 			}
 
 			mockDB := &mockDB{MockTx: &mockTx{}}
@@ -88,7 +94,7 @@ func TestClusterService_UpdateCluster_UpgradeWithoutVIP(t *testing.T) {
 				},
 			}, nil).Maybe()
 
-			svc := server.NewServerImpl(config.Config{AllowControlPlaneWithoutVIP: allow}, discardLogger(), mockDB, nil, nil)
+			svc := server.NewServerImpl(config.Config{AllowControlPlaneWithoutVIP: tc.override}, discardLogger(), mockDB, nil, nil)
 			resp, err := svc.UpdateCluster(context.Background(), api.UpdateClusterRequestObject{
 				ClusterID: clusterID,
 				Body: &api.UpdateClusterRequest{

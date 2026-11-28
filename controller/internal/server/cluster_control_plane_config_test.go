@@ -360,6 +360,18 @@ func TestApplyClusterLevelControlPlaneSpecUpdate_DesiredCount(t *testing.T) {
 		require.Equal(t, 5, cluster.ControlPlaneConfig.DesiredCount)
 	})
 
+	t.Run("allows scale-up with a controlPlaneEndpoint", func(t *testing.T) {
+		cluster := newCAPICluster(3, "")
+		cluster.ControlPlaneEndpoint = "172.31.0.20:6443"
+		spec := db.ConfigSpecFromFull(cluster.ControlPlaneConfig)
+		desired := 5
+		err := svc.applyClusterLevelControlPlaneSpecUpdate(ctx, cluster, &api.UpdateClusterControlPlaneConfig{
+			DesiredCount: &desired,
+		}, &spec)
+		require.NoError(t, err)
+		require.Equal(t, 5, cluster.ControlPlaneConfig.DesiredCount)
+	})
+
 	t.Run("rejects desiredCount below 1", func(t *testing.T) {
 		cluster := newCAPICluster(3, "")
 		spec := db.ConfigSpecFromFull(cluster.ControlPlaneConfig)
@@ -435,10 +447,12 @@ func TestApplyClusterControlPlaneConfigUpdate_RolloutRequiresVIP(t *testing.T) {
 		controlPlaneVIP string
 		wantBadRequest  bool
 		allowWithoutVIP bool
+		endpoint        string
 	}{
 		{name: "without VIP", wantBadRequest: true},
 		{name: "with VIP", controlPlaneVIP: "172.31.0.10"},
 		{name: "dev override without VIP", allowWithoutVIP: true},
+		{name: "with controlPlaneEndpoint", endpoint: "lb.example.com:6443"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			oldConfigID := uuid.New()
@@ -461,6 +475,7 @@ func TestApplyClusterControlPlaneConfigUpdate_RolloutRequiresVIP(t *testing.T) {
 					DesiredCount:           1,
 					ControlPlaneConfigSpec: currentSpec,
 				},
+				ControlPlaneEndpoint: tc.endpoint,
 			}
 			newProfile := "cfg-v2"
 			tx := &testutil.MockTx{}

@@ -652,10 +652,15 @@ func TestRemediateMachinesRecordsIntentUnderTheController(t *testing.T) {
 
 func TestRemediateMachinesWithoutControlPlaneVIP(t *testing.T) {
 	t.Parallel()
-	for _, allow := range []bool{false, true} {
-		t.Run(fmt.Sprintf("override=%t", allow), func(t *testing.T) {
+	for _, tc := range []struct {
+		override bool
+		endpoint string
+	}{{}, {override: true}, {endpoint: "lb.example.com:6443"}} {
+		// Remediation starts with the override or with a controlPlaneEndpoint.
+		allow := tc.override || tc.endpoint != ""
+		t.Run(fmt.Sprintf("override=%t endpoint=%s", tc.override, tc.endpoint), func(t *testing.T) {
 			t.Parallel()
-			cluster := db.Cluster{ID: uuid.New(), Name: "legacy-no-vip"}
+			cluster := db.Cluster{ID: uuid.New(), Name: "legacy-no-vip", ControlPlaneEndpoint: tc.endpoint}
 			healthy := func(name string) db.Node {
 				return db.Node{
 					ID: uuid.New(), ClusterID: cluster.ID, ControlPlane: true, Name: name,
@@ -684,7 +689,7 @@ func TestRemediateMachinesWithoutControlPlaneVIP(t *testing.T) {
 					return node.ID == marked.ID && nodes.IsDeleteRequested(*node)
 				})).Return(marked, nil).Once()
 			}
-			r := &reconciler{cfg: config.Config{AllowControlPlaneWithoutVIP: allow}, db: mockTx, logger: slog.Default()}
+			r := &reconciler{cfg: config.Config{AllowControlPlaneWithoutVIP: tc.override}, db: mockTx, logger: slog.Default()}
 
 			requeue, err := r.remediateMachines(context.Background(), cluster, cp)
 
