@@ -13,7 +13,7 @@ COPY podvm-entrypoint podvm-bootstrap podvm-endpoint-ready /usr/local/bin/
 COPY format-if-empty ovs-datapath-check build-ctr /usr/local/lib/podvm/
 COPY units/podvm-bootstrap.service units/podvm-bootstrap-final.service /etc/systemd/system/
 COPY units/zz-podvm-builtin-datapath.conf /etc/systemd/system/ovs-vswitchd.service.d/
-COPY units/zz-podvm-endpoint-gate.conf /etc/systemd/system/nvke-agent.service.d/
+COPY units/zz-podvm-agent-flags.conf /etc/systemd/system/nvke-agent.service.d/
 
 # The node agent settings move to the /var volume, behind a link: the bootstrap
 # data writes them through the link, and they stay through a new pod.
@@ -32,19 +32,28 @@ RUN set -eu; \
     ln -s /var/lib/podvm/agent/nvke-agent /etc/default/nvke-agent; \
     ln -sf /etc/machine-id /var/lib/dbus/machine-id
 
-# zz-podvm-endpoint-gate.conf gives the node agent the flags of the health gate.
-# An agent stops at a flag that it does not know, so the drop-in stays only
-# when the agent of the base image knows each flag of the drop-in.
+# zz-podvm-agent-flags.conf gives the node agent the flags of this image. An
+# agent stops at a flag that it does not know, so the build checks each flag of
+# the drop-in against the node agent of the base image. An agent with no
+# endpoint gate does not know the three gate flags, and the build then takes
+# them out of the drop-in. Any other flag that the agent does not know is an
+# error.
 RUN set -eu; \
-    dropin=/etc/systemd/system/nvke-agent.service.d/zz-podvm-endpoint-gate.conf; \
-    help="$(/usr/local/bin/nvke-agent --help 2>&1 || true)"; \
-    for flag in $(grep -o -e '--control-plane-endpoint-[a-z-]*' "$dropin"); do \
-      case "$help" in \
-        *" ${flag#-} "*) ;; \
-        *) echo "NOTICE: nvke-agent has no flag $flag. This image sets no health gate flags."; rm "$dropin"; break ;; \
+    dropin=/etc/systemd/system/nvke-agent.service.d/zz-podvm-agent-flags.conf; \
+    help="$(/usr/local/bin/nvke-agent --help 2>&1 | tr '\n' ' ')"; \
+    gate=on; \
+    for flag in $(grep '^Environment=' "$dropin" | grep -o -e '--[a-z0-9-]*'); do \
+      case "$help" in *" ${flag#-} "*) continue ;; esac; \
+      case "$flag" in \
+        --control-plane-endpoint-*) gate=off ;; \
+        *) echo "ERROR: nvke-agent has no flag $flag"; exit 1 ;; \
       esac; \
     done; \
-    [ ! -e "$dropin" ] || grep -q -x 'ExecStart=/usr/local/bin/nvke-agent \$AGENT_ARGS' /etc/systemd/system/nvke-agent.service \
+    if [ "$gate" = off ]; then \
+      echo "NOTICE: nvke-agent does not know the endpoint gate flags. This image sets none of them."; \
+      sed -i 's/ --control-plane-endpoint-[^ "]*//g' "$dropin"; \
+    fi; \
+    grep -q -x 'ExecStart=/usr/local/bin/nvke-agent \$AGENT_ARGS' /etc/systemd/system/nvke-agent.service \
       || { echo "ERROR: nvke-agent.service has another ExecStart line than the drop-in replaces"; exit 1; }
 
 # A base image with a CNI image package installs it at each start, before the
