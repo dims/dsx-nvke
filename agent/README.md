@@ -85,6 +85,21 @@ port 6443 (`ss -K`), and checks for 30 seconds that no new connection arrives
 there. A new connection fails the withdrawal. `StartKubeVipRestore` removes the
 gate file. A node with kube-vip and a gate leaves both, the gate first.
 
+`KubeadmUpgradeApply` withdraws the node through the gate in the same way,
+after `kubeadm upgrade plan` and before `kubeadm upgrade apply`, which restarts
+etcd and the API server of the node. It removes the gate file when
+`kubeadm upgrade apply` returns, also when that command fails. A withdrawal
+that fails stops the call before `kubeadm upgrade apply`. This call does not
+withdraw kube-vip. On a cluster with one control plane node, which the agent
+reads as one voting member of etcd, the gate stays open: `kubeadm` reaches the
+cluster through the load balancer, and no other node is behind it. The gate
+also stays open when the agent cannot list the members of etcd.
+
+Other calls that restart the API server, such as the certificate renewal, do
+not touch the gate. Their caller closes it first with
+`StartK8sControlPlaneNodeGracefulShutdown` and opens it with
+`StartKubeVipRestore`.
+
 The agent cannot see the load balancer, so the deployment has to provide:
 
 - A health check that fails while the gate file exists, and that passes only
@@ -106,6 +121,8 @@ The content of the gate file says who opens the gate:
   reboot does not clear.
 - `/etc/kubernetes/manifests-backup/etcd-defrag`: the agent, at the end of the
   defragmentation or at its next start.
+- `kubeadm-upgrade-apply`: the agent, when `kubeadm upgrade apply` returns or at
+  its next start.
 - Other content, such as a file made by hand: a caller.
 
 ### Logs

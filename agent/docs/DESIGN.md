@@ -409,7 +409,10 @@ the VIP back on `lo`. Manifest moves are the control mechanism (kubelet reacts t
 With `--control-plane-endpoint-gate-file` set, the shutdown first takes the node
 out of a load balancer it does not run: create the gate file → wait the settle
 time → close established remote `backend:6443` sockets → verify the same quiet
-window. `StartKubeVipRestore` then also removes the gate file. See
+window. `StartKubeVipRestore` then also removes the gate file.
+`KubeadmUpgradeApply` takes the node out the same way between
+`kubeadm upgrade plan` and `kubeadm upgrade apply`, and removes the gate file
+itself when the command returns. See
 [Control plane endpoint gate](../README.md#control-plane-endpoint-gate).
 
 ### 9.5 Bundles / packages / collections
