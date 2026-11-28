@@ -1,6 +1,6 @@
 # Branches to share: NVKE control plane nodes as Kata pods
 
-Last update: 2026-11-28, 08:32 local time. Each tip in the state table was the tip of its branch on the fork at that time (fetched at 08:32).
+Last update: 2026-11-28, 08:44 local time. Each tip in the state table was the tip of its branch on the fork at that time (fetched at 08:44).
 
 This page lists the only branches that the larger team needs. Each of the eleven is meant to become one pull request. No pull request is open yet. One more branch, `integration/control-plane-kata-pods`, holds the commits of the ten NVKE branches together, for a person who wants to try the feature. It is not for a pull request. Every other branch on the two forks is lab material and is not for sharing.
 
@@ -124,7 +124,7 @@ The eight commits below hold the behavior of the three commits that the lab ran,
 - `120b0ff2` docs: describe controlPlaneEndpoint for workload clusters (23 lines)
   - The guide pages say what the endpoint must do: it exists before the request, it forwards TCP to port 6443 of each control plane node whose API server is ready, each node and the NVKE controller can reach it, and NVKE does not take a node out of it before a restart of the API server or etcd there.
 - Proof: each commit builds and passes all controller tests with no test cache (76 packages), and `make generate` and `make lint` are clean at each commit. The API check against `controller/api/v0.0.71` finds 14 additive changes and no breaking one.
-- Known, for the text of the pull request: no end to end test creates a cluster with the field, NVKE does not check that the endpoint works, the SQL of the migration has no test, and the site bootstrap of nvkectl and the `NVKECluster` resource cannot set the field yet (a request file through `nvkectl create cluster -f` passes it). When the endpoint must work is stated from how kubeadm uses it, and no test of the repository proves it.
+- Known, for the text of the pull request: no end to end test creates a cluster with the field, NVKE does not check that the endpoint works, the SQL of the migration has no test in the repository (the same migration file ran on PostgreSQL in the lab), and the site bootstrap of nvkectl and the `NVKECluster` resource cannot set the field yet (a request file through `nvkectl create cluster -f` passes it). When the endpoint must work is stated from how kubeadm uses it, and no test of the repository proves it.
 
 ### 6. `feat/agent-endpoint-health-gate`
 
@@ -231,7 +231,8 @@ https://github.com/dims/kata-containers/tree/fix/agent-kill-child-cgroups
 - `e0f5597` agent: kill the init process and child cgroups of a container
   - The need: a container that runs systemd keeps processes in child cgroups. The Kata agent did not end them when the container was killed.
   - The change: the agent kills the init process and the child cgroups of the container.
-  - The lab ran each test with it. A second change of the lab, for exec in such a container, belongs to an upstream pull request of another author and is not on this branch.
+  - The first lab runs used the stock agent and showed the fault. Each lab test after the fix ran with it. A second change of the lab, for exec in such a container, belongs to an upstream pull request of another author and is not on this branch.
+  - Before a pull request: the contribution rules of Kata Containers ask the author to write the commit message and the summary of the pull request himself, and to disclose the help of an AI tool with a trailer in the commit message (`Assisted-By:` or `Generated-By:`). The commit has no such trailer, and an agent wrote its message. Davanum must do both himself.
 
 ### 11. `feat/podvm-deploy-path`
 
@@ -260,6 +261,6 @@ The branch adds what a person needs, beyond the provider and its node image, to 
 - `56e3be69` docs(cli): add an example node pool of nico-mock workers for a pod VM cluster (48 lines)
 - `b4bbfa94` docs(cli): add an example cluster with control plane nodes as pods (109 lines)
   - `cli/examples/podvm-cluster.yaml`. It uses the request field of branch 5. So the test that decodes the examples fails for this file on this branch alone and passes with branch 5 below it, as in the integration branch. The pull request of this branch comes after branch 5.
-- Proof so far, static checks only: the repository checks pass (deploy lists, license headers, names, internal config, docs, shell lint, workflows), the controller chart renders with the settings of the path and differs from the render of `capnico-e2e` only in the four intended points, the deploy executor walks the ten items of the path in a dry run, and the Kata chart of 4.4.0 renders the custom runtime. The charts of MetalLB and of the storage provisioner were not rendered.
+- Proof so far, static checks only: the repository checks pass at the tip (deploy lists, license headers, names, internal config, docs, shell lint, workflows), the controller chart renders with the settings of the path and differs from the render of `capnico-e2e` only in the four intended points, the deploy executor walks the ten items of the path in a dry run, and the Kata chart of 4.4.0 renders the custom runtime. The charts of MetalLB and of the storage provisioner were not rendered.
 - Open: nothing of it ran on a cluster. These things run for the first time in the first run: the guest image build from the make target of Kata, the custom runtime of the Kata chart, MetalLB on the bridge, the provisioner on loop devices, the simulator as a process on the machine, `deploy-stack.sh` outside its test runner, the Service that the provider makes, a worker with one network, a new node that pulls its own images, and `nvkectl`.
 - Open, for the product: with OIDC on, the provider needs the SPIFFE program and socket in its pod to reach a cluster, as the Cluster API controllers get them from `controller/deploy/k8s/capi-spiffe-exec-auth`. The path turns OIDC off, as the lab did. The provider is not an item of the path: it installs with `kubectl apply -k` before it, because no image of the provider is published. No CI lane uses the path yet.
