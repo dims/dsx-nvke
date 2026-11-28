@@ -5,7 +5,7 @@ State of 2026-11-28. The guide uses two public branches:
 - `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `8bc32175`
 - `integration/control-plane-kata-pods` of `https://github.com/dims/kata-containers`, at `96a8d905b`
 
-**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Scenarios 1 to 5 passed too. Scenario 6 did not pass. Each other scenario ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
+**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Scenarios 1 to 5 and 7 passed too. Scenario 6 did not pass at its first try, and a second try is under way. Each other scenario ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
 
 ## What the feature is
 
@@ -378,7 +378,7 @@ nvkectl get clusters podvm-example -o yaml | grep etcdEncrypted
 
 ### Scenario 7, a full failure domain
 
-**Lab.** In the lab a worker that was a pod took the place. Here a plain pod does.
+**Ran in the first run of 2026-11-28.** In the lab a worker that was a pod took the place. Here a plain pod does. The run rolled to the tag `podvm-node:local`, because the control plane was at `podvm-node:local-b` then: take the tag that the control plane does not have.
 
 Each kind worker has two volume places, and a control plane node holds one. Check with `kh -n podvm-clusters get pods -o wide` that `podvm-worker` runs one control plane pod. Take its second place, then roll the control plane:
 
@@ -411,9 +411,11 @@ template podvm-node:local-b | nvkectl patch cluster podvm-example --patch-file -
 kh -n nvke-system get podvmmachines --watch
 ```
 
-- **Pass.** One machine shows the reason `FailureDomainUnavailable`, and its pod stays Pending. About 15 minutes later NVKE deletes that node and makes a new one on another kind worker. The rollout then ends with three new nodes.
+- **Pass.** One machine shows the reason `FailureDomainUnavailable`, and its pod stays Pending. About 16 minutes later NVKE deletes that node and makes a new one on another kind worker. The rollout then ends with three new nodes.
+- **It can happen two times.** The new node goes to a kind worker that already runs a control plane node, and that worker is full then. In the first run the machine for the next old node on that worker waited 16 minutes too.
+- **What stays.** At the end one kind worker runs two control plane nodes and one runs none. The next rollout starts with a machine for the full worker and waits 16 minutes one more time. After that rollout each kind worker runs one node again.
 - **After it.** `kh -n podvm-clusters delete pod/blocker pvc/blocker-var pvc/blocker-etcd`.
-- **Time.** About 30 minutes.
+- **Time.** In the first run 42 minutes, with two waits of 16 minutes. The loop of scenario 5 on the API had 2419 of 2419 calls with an answer.
 
 ### Scenario 8, upgrade the Kubernetes version
 
