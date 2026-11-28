@@ -7,9 +7,11 @@ that cluster's kubeconfig. Clients connect to that endpoint directly; neither
 the NVKE Controller nor `nvkectl` proxies Kubernetes API traffic.
 
 The preferred endpoint is a private kube-vip address shared by the control-plane
-nodes. If the cluster has no control-plane VIP, NVKE uses the first
-control-plane node's IP address instead. That fallback is not load balanced and
-loses API availability when that node or its network path is unavailable.
+nodes. A cluster created with `controlPlaneEndpoint` uses that address instead,
+which NVKE does not manage, and runs no kube-vip. If the cluster has neither,
+NVKE uses the first control-plane node's IP address. That fallback is not load
+balanced and loses API availability when that node or its network path is
+unavailable.
 
 NVKE does not create a public Kubernetes API endpoint. A deployment must provide
 the routes and filtering that make the private endpoint reachable from approved
@@ -20,8 +22,8 @@ before tenant access is enabled.
 ## Principal Classes
 
 The following table describes the alpha access model. "Tenant API endpoint"
-means the control-plane VIP when configured and the first control-plane node IP
-otherwise.
+means the control-plane VIP or the `controlPlaneEndpoint` when one is configured,
+and the first control-plane node IP otherwise.
 
 | Principal | Authentication | Authorization | Network path | Credential lifetime |
 |---|---|---|---|---|
