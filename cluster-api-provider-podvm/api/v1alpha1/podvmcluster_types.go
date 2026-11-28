@@ -4,6 +4,7 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
@@ -57,11 +58,35 @@ type AddressRange struct {
 	PrefixLength int32 `json:"prefixLength"`
 }
 
+// ControlPlaneServiceSpec holds what the load balancer of the host cluster
+// needs from the caller for the Service of the control plane.
+type ControlPlaneServiceSpec struct {
+	// Annotations are the annotations of the Service. An implementation of a
+	// load balancer reads its settings from them, for example the fixed
+	// address that the Service must get.
+	// +optional
+	Annotations map[string]string `json:"annotations,omitempty"`
+
+	// LoadBalancerClass names the implementation of the load balancer. When
+	// it is empty, the default implementation of the host cluster takes the
+	// Service.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	LoadBalancerClass string `json:"loadBalancerClass,omitempty"`
+
+	// ExternalTrafficPolicy is the external traffic policy of the Service.
+	// When it is empty, the default of the host cluster applies.
+	// +optional
+	// +kubebuilder:validation:Enum=Cluster;Local
+	ExternalTrafficPolicy corev1.ServiceExternalTrafficPolicy `json:"externalTrafficPolicy,omitempty"`
+}
+
 // PodVMClusterSpec defines the desired state of PodVMCluster.
 //
 // The spec holds no control plane endpoint. The NVKE controller takes the
 // endpoint from the controlPlaneEndpoint field of its own cluster API and
 // ignores an endpoint on the infrastructure cluster.
+// +kubebuilder:validation:XValidation:rule="has(self.controlPlaneService) == has(oldSelf.controlPlaneService)",message="controlPlaneService cannot be added or removed"
 type PodVMClusterSpec struct {
 	// PodNamespace is the namespace of the host cluster in which the provider
 	// makes the pods, the volume claims and the copies of the bootstrap
@@ -98,15 +123,30 @@ type PodVMClusterSpec struct {
 	// +kubebuilder:default="topology.kubernetes.io/zone"
 	// +kubebuilder:validation:MaxLength=317
 	FailureDomainLabelKey string `json:"failureDomainLabelKey,omitempty"`
+
+	// ControlPlaneService asks the provider to make the Service of the
+	// control plane endpoint: one Service of the type LoadBalancer in
+	// spec.podNamespace, with port 6443, that selects the control plane pods
+	// of the cluster. The caller gives the address of that Service to the
+	// NVKE controller as the controlPlaneEndpoint of the cluster request, so
+	// the address must be known before the request. The annotations are the
+	// place to ask the load balancer for a fixed address.
+	//
+	// When the field is not set, the provider makes no Service, and the
+	// caller brings the endpoint.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="controlPlaneService is immutable"
+	ControlPlaneService *ControlPlaneServiceSpec `json:"controlPlaneService,omitempty"`
 }
 
 // PodVMClusterInitializationStatus reports the initialization state that the
 // Cluster API contract requires.
 // +kubebuilder:validation:MinProperties=1
 type PodVMClusterInitializationStatus struct {
-	// Provisioned is true when the spec is valid. The core Cluster API machine
-	// controller waits for this field before it acts on any machine of the
-	// cluster.
+	// Provisioned is true when the spec is valid and, with
+	// spec.controlPlaneService, when the Service of the control plane has an
+	// address. The core Cluster API machine controller waits for this field
+	// before it acts on any machine of the cluster.
 	// +optional
 	Provisioned *bool `json:"provisioned,omitempty"`
 }

@@ -98,6 +98,46 @@ spec:
                 x-kubernetes-validations:
                 - message: addressRange is immutable
                   rule: self == oldSelf
+              controlPlaneService:
+                description: |-
+                  ControlPlaneService asks the provider to make the Service of the
+                  control plane endpoint: one Service of the type LoadBalancer in
+                  spec.podNamespace, with port 6443, that selects the control plane pods
+                  of the cluster. The caller gives the address of that Service to the
+                  NVKE controller as the controlPlaneEndpoint of the cluster request, so
+                  the address must be known before the request. The annotations are the
+                  place to ask the load balancer for a fixed address.
+
+                  When the field is not set, the provider makes no Service, and the
+                  caller brings the endpoint.
+                properties:
+                  annotations:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      Annotations are the annotations of the Service. An implementation of a
+                      load balancer reads its settings from them, for example the fixed
+                      address that the Service must get.
+                    type: object
+                  externalTrafficPolicy:
+                    description: |-
+                      ExternalTrafficPolicy is the external traffic policy of the Service.
+                      When it is empty, the default of the host cluster applies.
+                    enum:
+                    - Cluster
+                    - Local
+                    type: string
+                  loadBalancerClass:
+                    description: |-
+                      LoadBalancerClass names the implementation of the load balancer. When
+                      it is empty, the default implementation of the host cluster takes the
+                      Service.
+                    maxLength: 253
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: controlPlaneService is immutable
+                  rule: self == oldSelf
               failureDomainLabelKey:
                 default: topology.kubernetes.io/zone
                 description: |-
@@ -154,6 +194,9 @@ spec:
             - podNamespace
             - runtimeClassName
             type: object
+            x-kubernetes-validations:
+            - message: controlPlaneService cannot be added or removed
+              rule: has(self.controlPlaneService) == has(oldSelf.controlPlaneService)
           status:
             description: PodVMClusterStatus defines the observed state of PodVMCluster.
             properties:
@@ -254,9 +297,10 @@ spec:
                 properties:
                   provisioned:
                     description: |-
-                      Provisioned is true when the spec is valid. The core Cluster API machine
-                      controller waits for this field before it acts on any machine of the
-                      cluster.
+                      Provisioned is true when the spec is valid and, with
+                      spec.controlPlaneService, when the Service of the control plane has an
+                      address. The core Cluster API machine controller waits for this field
+                      before it acts on any machine of the cluster.
                     type: boolean
                 type: object
             type: object
