@@ -5,7 +5,7 @@ State of 2026-11-28. The guide uses two public branches:
 - `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `7da67615`
 - `integration/control-plane-kata-pods` of `https://github.com/dims/kata-containers`, at `96a8d905b`
 
-**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Scenarios 1 to 3 passed too. Each other scenario ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
+**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Scenarios 1 to 4 passed too. Each other scenario ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
 
 ## What the feature is
 
@@ -319,7 +319,7 @@ kh -n podvm-clusters get pods -o wide --watch
 
 ### Scenario 4, replace a control plane node
 
-**Lab.** The lab sent the same three requests with `curl`.
+**Ran in the first run of 2026-11-28.** The oldest control plane node is the first line of `kc get nodes --sort-by=.metadata.creationTimestamp`.
 
 ```bash
 nvkectl patch cluster podvm-example --patch 'controlPlaneConfig: {desiredCount: 4}'
@@ -331,7 +331,7 @@ nvkectl patch cluster podvm-example --patch 'controlPlaneConfig: {desiredCount: 
 
 - **Pass.** After the DELETE a new control plane node joins, and NVKE does it alone. At the end `kc get nodes` shows three control plane nodes that are Ready. Some minutes later `kh get pv` shows no volume with the status `Released`.
 - **Why 4 first.** NVKE refuses the delete of a control plane node while only three are joined.
-- **Time.** The lab measured 2 min 26 s for the fourth node and 3 min 21 s for the new node after the delete.
+- **Time.** In the first run the fourth node took 2 min 21 s, and the new node after the delete 4 min 15 s. After the last patch NVKE removed one node in 73 s. The volumes of each removed node were `Available` again in under 30 s.
 
 ### Scenario 5, roll the control plane to a new image
 
