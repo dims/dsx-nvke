@@ -21,7 +21,7 @@ State of 2026-11-28. The guide uses two public branches:
 - 16 CPUs, 48 GB of memory and 100 GB of free disk. Our lab machine was larger, and a smaller one never ran.
 - `sudo` rights, for `modprobe`, `sysctl` and `losetup`.
 - Docker 28 or newer with `buildx`. A container must reach the internet.
-- `git`, `make`, `curl`, `jq`, `zstd`, Go 1.27, `kind`, `kubectl`, `helm`, `clusterctl`, and for the kernel build `yq`, `flex`, `bison` and the headers of `libelf`.
+- `git`, `make`, a C compiler, `python3`, `curl`, `jq`, `tar` with `zstd`, Go 1.27, `kind`, `kubectl`, `helm`, `clusterctl`, and for the kernel build `yq`, `flex`, `bison`, `patch` and the headers of `libelf`.
 - No account and no secret. Each input is public.
 
 ## The marks
@@ -29,6 +29,7 @@ State of 2026-11-28. The guide uses two public branches:
 - **Ran.** The same commands ran, in our lab or in a check of the branch.
 - **Lab.** The same thing ran in our lab, with other commands.
 - **New.** It never ran in any form.
+- **Ran in the first run of 2026-11-28.** The step passed as this guide has it, in the first run of the guide on one machine.
 
 A mark says nothing about this path as a whole. No step here has a pass from a run of the guide.
 
@@ -62,7 +63,7 @@ docker run --rm busybox:1.36 wget -q -O /dev/null https://github.com && echo "a 
 
 ### 2. Get the two trees
 
-**New.**
+**Ran in the first run of 2026-11-28.**
 
 ```bash
 mkdir -p $TRY && cd $TRY
@@ -74,7 +75,7 @@ git clone --branch integration/control-plane-kata-pods https://github.com/dims/k
 
 ### 3. Build the guest kernel
 
-**Lab.** The lab built with the same build files, inside a container.
+**Ran in the first run of 2026-11-28.** The build took 68 s on 64 CPUs.
 
 Run the commands of `cluster-api-provider-podvm/node-image/README.md`, section "The guest kernel", from `$NVKE`. Then:
 
