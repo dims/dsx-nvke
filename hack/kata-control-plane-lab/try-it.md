@@ -100,7 +100,7 @@ Run the commands for `kata-containers.img` of the README, section "1. Build the 
 
 ### 5. Build the base node image
 
-**Ran.**
+**Ran in the first run of 2026-11-28.** The two commands took 3 min 22 s.
 
 Run the two commands of `cluster-api-provider-podvm/node-image/README.md`, section "The base image".
 
@@ -108,7 +108,7 @@ Run the two commands of `cluster-api-provider-podvm/node-image/README.md`, secti
 
 ### 6. Build the other images and nvkectl
 
-**Lab** for the controller image and the provider image. **Ran** for the node image and `nvkectl`.
+**Ran in the first run of 2026-11-28.** The five commands took 1 min 54 s.
 
 Run the commands of the README, section "2. Build the images and nvkectl", from `$NVKE`.
 
