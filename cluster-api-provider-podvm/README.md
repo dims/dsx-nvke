@@ -423,6 +423,43 @@ placeholder for a value of your site.
 A test checks each object of the provider against the schema of its generated
 CRD, and that the five files name each other.
 
+### Roll to a new image
+
+A machine never gets a new image or a new size. To change one of them for the
+control plane nodes, send the whole machine template again with the new value.
+`<API_URL>` and the API token are described in
+[Manage node pools](../docs/workload-clusters/node-pools.md).
+
+```bash
+curl -X PATCH "<API_URL>/api/clusters/<CLUSTER_ID>" \
+  -H 'Content-Type: application/json' \
+  -d '{"controlPlaneConfig": {"infra": {"machineTemplate": {
+        "apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha1",
+        "kind": "PodVMMachineTemplate",
+        "spec": {"template": {"spec": {
+          "image": "registry.example.com/nvke/podvm-node:1.36.3-2",
+          "resources": {"cpu": "4", "memory": "8Gi"},
+          "volumes": {
+            "var": {"storageClassName": "block-storage", "size": "40Gi"},
+            "etcd": {"storageClassName": "block-storage", "size": "10Gi"}
+          }
+        }}}
+      }}}}'
+```
+
+The NVKE controller then replaces each control plane node whose template
+differs from the new one, one node at a time. The rules are those of step 1 in
+[Upgrade the control plane](../docs/workload-clusters/upgrade.md#upgrade-the-control-plane):
+`enableCPNodeRecycling` must be on, and with `maxSurge: 1` each new node comes
+before an old one goes. The NVKE controller refuses the request for a cluster
+with no shared endpoint, see
+[What the NVKE controller needs](#what-the-nvke-controller-needs).
+
+Each new node is a new Machine with a new pod, two new volumes and a new
+address. So a rollout with `maxSurge: 1` needs one free address in the range
+and two free volumes. The address of an old node is free, and its two claims
+are deleted, when its `PodVMMachine` is gone.
+
 ## What the NVKE controller needs
 
 The chart values that the NVKE controller needs for this provider are in
