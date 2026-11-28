@@ -295,10 +295,11 @@ EXTRA=()
 
 # capnico-e2e renders the Secret CAPNICo reads. CAPD needs none of this:
 # clusterctl init brings that provider, and the controller reaches it with no credentials.
+# podvm-e2e renders it too, because its workers come from the same simulator.
 #
 # The provider itself is not an item -- install-capnico.sh installs it before
 # this runs -- so nothing here names a chart for it.
-if [[ "${DEPLOY_TARGET}" == capnico-e2e ]]; then
+if [[ "${DEPLOY_TARGET}" == capnico-e2e || "${DEPLOY_TARGET}" == podvm-e2e ]]; then
   # Where CAPNICo reaches the NICo API. Empty NICO_ENDPOINT means the simulator,
   # matching controller/hack/nico-provider/Tiltfile: the host defaults to the
   # kind host address and the port is the simulator's. The other three are the

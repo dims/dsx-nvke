@@ -32,26 +32,37 @@ apiAuth:
             - namespace: nke-clients
               name: nke-client
 
-# The controller reconciles CAPI objects, so it needs the RBAC for them.
-# The controller accepts only the API provider blocks named here, and this lane needs
-# BOTH. The e2e suite submits an Infra block for the nico-containers backend --
-# buildNicoRequest in test/e2e/internal/nvke/request.go builds NicoCluster and
-# NicoMachine manifests inside api.InfraClusterProvider -- and reserves the Nico
-# block for nico-vms. controller/Tiltfile derives the same pair for a provider
-# list containing "nico".
+# The controller reconciles CAPI objects, so it needs the RBAC for them, and
+# podvm adds the three kinds of cluster-api-provider-podvm.
 #
-# "nico" alone parses and starts the controller, then rejects every create with "infra
-# provider is not supported by this deployment", which is how this was found.
-supportedInfraProviders: nico,infra
+# A cluster request reaches that provider through the Infra block, which carries
+# a PodVMCluster and a PodVMMachineTemplate. A worker pool of the simulator
+# comes the same way, with a NicoMachineTemplate, so the Nico block and the
+# controllers that watch NicoClusters are not needed here.
+supportedInfraProviders: infra
+controllers:
+  nico:
+    enabled: false
 capi:
   rbac:
     create: true
+    podvm: true
 
+# The provider reads the kubeconfig Secret that tenant access publishes, to set
+# the provider ID on each Node of the new cluster.
 tenantAccess:
   enabled: true
 
+# A pod has no TPM, so a node gets its identity from a join token.
+# deploy-stack.sh passes the method of the run, which must be the same.
+nodeAgent:
+  spireAttestationMethod: joinToken
+
+# Off, because the kubeconfig Secret of an OIDC cluster uses SPIRE exec-auth,
+# and the image of the provider has no exec-auth program. The settings below
+# stay, so that turning it on is one line once the provider can use it.
 nvkeOIDCAuth:
-  enabled: true
+  enabled: false
   # Logical issuer, string-compared against the JWT's iss claim; it does not
   # have to resolve. discoveryURL does, and is VIP-derived, so it is passed in.
   issuerURL: "https://nke.site-controller.internal"
@@ -67,9 +78,10 @@ nvkeOIDCAuth:
 cni:
   installAfterInit: true
 
-# Of the variables the Tiltfile forwards, backend-e2e.sh sets only this one.
-# A container node cannot reboot in-guest, so the reboot goes out of band
-# through the CAPI Machine annotation instead.
+# A pod and a container node get no new boot ID from a reboot in the guest, so
+# the reboot goes out of band through the CAPI Machine annotation instead.
+# deploy-stack.sh replaces this list, so the run must also export
+# NODE_REBOOT_SOFT_REBOOT_ENABLED=false.
 env:
   - name: NODE_REBOOT_SOFT_REBOOT_ENABLED
     value: "false"
