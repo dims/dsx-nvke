@@ -173,6 +173,15 @@ func TestPodVMClusterRulesAboutAChange(t *testing.T) {
 			refusal: "networkAttachment is immutable",
 		},
 		{
+			name:    "another failure domain label",
+			change:  func(spec map[string]any) { spec["failureDomainLabelKey"] = "example.com/rack" },
+			refusal: "failureDomainLabelKey is immutable",
+		},
+		{
+			name:   "the failure domain label left out, which gives the same default",
+			change: func(spec map[string]any) { delete(spec, "failureDomainLabelKey") },
+		},
+		{
 			name: "another address block",
 			change: func(spec map[string]any) {
 				spec["addressRange"] = map[string]any{"cidr": "198.51.100.128/26", "prefixLength": int64(24)}
@@ -209,6 +218,18 @@ func TestPodVMClusterRuleRefusesAControlPlaneServiceThatIsAdded(t *testing.T) {
 	delete(specOf(t, old), "controlPlaneService")
 
 	require.Contains(t, rules.update(t, old, parseObject(t, clusterObject)), "controlPlaneService cannot be added or removed")
+}
+
+// A field that is left out gets its default before the rules run. So the rule
+// also refuses the removal of a failure domain label that is not the default.
+func TestPodVMClusterRuleRefusesAFailureDomainLabelThatIsRemoved(t *testing.T) {
+	rules := loadCRDRules(t, "podvmclusters")
+	old := parseObject(t, clusterObject)
+	specOf(t, old)["failureDomainLabelKey"] = "example.com/rack"
+	changed := parseObject(t, clusterObject)
+	delete(specOf(t, changed), "failureDomainLabelKey")
+
+	require.Contains(t, rules.update(t, old, changed), "failureDomainLabelKey is immutable")
 }
 
 const machineObject = `

@@ -146,8 +146,17 @@ spec:
                   value of this label. When no node carries the label, the provider
                   publishes one failure domain for each host node, from the label
                   kubernetes.io/hostname.
+
+                  It cannot change. The machines that exist name failure domains that
+                  the cluster reported for this label. With another label the cluster
+                  would report other failure domains, and the next pod of a machine would
+                  ask for its old failure domain under the new label. A machine that was
+                  placed by a value of the old label would then find no host node.
                 maxLength: 317
                 type: string
+                x-kubernetes-validations:
+                - message: failureDomainLabelKey is immutable
+                  rule: self == oldSelf
               networkAttachment:
                 description: |-
                   NetworkAttachment names the NetworkAttachmentDefinition of the node
