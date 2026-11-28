@@ -25,6 +25,26 @@ const (
 	// AddressRangeOverlapReason means spec.addressRange overlaps the range of
 	// a PodVMCluster that is older. The older cluster keeps its range.
 	AddressRangeOverlapReason = "AddressRangeOverlap"
+
+	// WaitingForOwnerClusterReason means Cluster API has not yet set the owner
+	// reference on a PodVMCluster that asks for a control plane Service. The
+	// Service selects the name of the owner Cluster.
+	WaitingForOwnerClusterReason = "WaitingForOwnerCluster"
+
+	// ControlPlaneServiceNameInvalidReason means the name of the owner Cluster
+	// gives no valid name for the control plane Service. The message names
+	// the rule.
+	ControlPlaneServiceNameInvalidReason = "ControlPlaneServiceNameInvalid"
+
+	// ControlPlaneServiceConflictReason means a Service with the name of the
+	// control plane Service exists in the pod namespace and belongs to
+	// something else. The provider does not change it and does not delete it.
+	ControlPlaneServiceConflictReason = "ControlPlaneServiceConflict"
+
+	// WaitingForLoadBalancerAddressReason means the control plane Service
+	// exists and the load balancer of the host cluster gave it no address
+	// yet.
+	WaitingForLoadBalancerAddressReason = "WaitingForLoadBalancerAddress"
 )
 
 // Reasons of the Ready condition of a PodVMMachine.

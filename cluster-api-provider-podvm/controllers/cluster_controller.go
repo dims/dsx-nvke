@@ -22,13 +22,15 @@ import (
 	infrav1 "github.com/dsx-ai-factory/nvke/cluster-api-provider-podvm/api/v1alpha1"
 )
 
-// +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=podvmclusters,verbs=get;list;watch
+// +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=podvmclusters,verbs=get;list;patch;watch
 // +kubebuilder:rbac:groups=infrastructure.cluster.x-k8s.io,resources=podvmclusters/status,verbs=patch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=list;watch
+// +kubebuilder:rbac:groups="",resources=services,verbs=create;delete;get;list;watch
 
 // ClusterReconciler checks the spec of a PodVMCluster, publishes the failure
-// domains of the host cluster and reports the cluster as provisioned.
+// domains of the host cluster, makes the Service of the control plane endpoint
+// when the spec asks for one, and reports the cluster as provisioned.
 //
 // Reporting the cluster is not optional. The core Cluster API machine
 // controller waits for status.initialization.provisioned on the infrastructure
@@ -53,7 +55,8 @@ func NewClusterReconciler(k8sClient client.Client, apiReader client.Reader, logg
 // SetupWithManager registers the reconciler with a manager.
 //
 // The reconciler also watches the nodes of the host cluster, because the
-// failure domains come from their labels.
+// failure domains come from their labels, and the control plane Services it
+// made, because the load balancer writes the address to their status.
 func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infrav1.PodVMCluster{}).
@@ -61,6 +64,10 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&corev1.Node{},
 			handler.EnqueueRequestsFromMapFunc(r.nodeToClusters),
 			builder.WithPredicates(nodePlacementChanged()),
+		).
+		Watches(
+			&corev1.Service{},
+			handler.EnqueueRequestsFromMapFunc(serviceToCluster),
 		).
 		Named("podvm-cluster").
 		Complete(r)
@@ -86,10 +93,12 @@ func (r *ClusterReconciler) nodeToClusters(ctx context.Context, _ client.Object)
 
 // Reconcile checks the spec and reports the state of the cluster.
 //
-// The provider holds no finalizer on the cluster. Every object it makes
-// belongs to a PodVMMachine, and each machine records the namespace of its
-// objects in its own status, so a deleted cluster needs no cleanup and its
-// delete never waits for the provider.
+// A cluster with no control plane Service gets no finalizer. Every other
+// object of the provider belongs to a PodVMMachine, and each machine records
+// the namespace of its objects in its own status, so such a cluster needs no
+// cleanup and its delete never waits for the provider. Only a cluster that
+// asks for a control plane Service gets a finalizer, which holds it until that
+// Service is gone.
 func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := r.logger.With("namespace", req.Namespace, "podVMCluster", req.Name)
 
@@ -102,8 +111,11 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	if !infraCluster.DeletionTimestamp.IsZero() {
-		logger.Debug("PodVMCluster is being deleted, skipping")
-		return ctrl.Result{}, nil
+		return r.reconcileDelete(ctx, infraCluster, logger)
+	}
+
+	if added, err := r.ensureClusterFinalizer(ctx, infraCluster); err != nil || added {
+		return ctrl.Result{RequeueAfter: retryNow}, err
 	}
 
 	before := infraCluster.DeepCopy()
@@ -128,11 +140,29 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, fmt.Errorf("failed to list the nodes of the host cluster: %w", err)
 	}
 	domains := failureDomainsFromNodes(nodes.Items, infraCluster.FailureDomainLabelKey())
+	infraCluster.Status.FailureDomains = domains
+	ready := fmt.Sprintf("Spec is valid, %d failure domains", len(domains))
+
+	if infraCluster.Spec.ControlPlaneService != nil {
+		address, problem, err := r.reconcileControlPlaneService(ctx, infraCluster, logger)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if problem != nil {
+			// The cluster is not provisioned before its endpoint has an
+			// address: the first node of the cluster needs it. A flag that
+			// was already reported stays, as for an unusable spec.
+			logger.Info("Control plane Service is not ready", "reason", problem.reason, "message", problem.message)
+			setCondition(infraCluster, metav1.ConditionFalse, problem.reason, problem.message)
+			// A Service of another owner can go away with no event that
+			// reaches this controller, so look again after a while.
+			return ctrl.Result{RequeueAfter: retryAfter}, r.patchStatus(ctx, infraCluster, before)
+		}
+		ready += fmt.Sprintf(", the control plane Service has the address %s", address)
+	}
 
 	infraCluster.Status.Initialization.Provisioned = ptr.To(true)
-	infraCluster.Status.FailureDomains = domains
-	setCondition(infraCluster, metav1.ConditionTrue, infrav1.ClusterSpecValidReason,
-		fmt.Sprintf("Spec is valid, %d failure domains", len(domains)))
+	setCondition(infraCluster, metav1.ConditionTrue, infrav1.ClusterSpecValidReason, ready)
 
 	if err := r.patchStatus(ctx, infraCluster, before); err != nil {
 		return ctrl.Result{}, err
@@ -145,7 +175,7 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 // patchStatus writes the status when it differs from the status that the
 // reconcile started with.
 //
-// A PodVMCluster has no finalizer, so it is gone the moment it is deleted. A
+// A PodVMCluster with no finalizer is gone the moment it is deleted. A
 // reconcile that started from a cache that still showed it has nothing left
 // to do, and that is not an error.
 func (r *ClusterReconciler) patchStatus(ctx context.Context, infraCluster, before *infrav1.PodVMCluster) error {

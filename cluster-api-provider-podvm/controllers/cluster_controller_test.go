@@ -169,8 +169,8 @@ func TestClusterReconcilerKeepsProvisionedWhenTheSpecTurnsUnusable(t *testing.T)
 }
 
 // The NVKE controller deletes the infrastructure cluster after the last
-// Machine is gone and waits for it. The provider holds no finalizer, so the
-// delete never waits, with or without machines.
+// Machine is gone and waits for it. A cluster with no control plane Service
+// has no finalizer, so its delete never waits, with or without machines.
 func TestClusterReconcilerDoesNotBlockTheDeleteOfTheCluster(t *testing.T) {
 	tests := []struct {
 		name    string
