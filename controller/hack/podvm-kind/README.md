@@ -172,11 +172,15 @@ a join token, and asks the provider for a new pod when a node must reboot.
 ## 7. Create a cluster
 
 ```bash
-kubectl --context kind-podvm -n nvke-controller port-forward service/nvke-controller 8080:8080 &
+API_PORT=8080
+kubectl --context kind-podvm -n nvke-controller port-forward service/nvke-controller "${API_PORT}:8080" &
 kubectl config view --raw --minify --context kind-podvm >podvm.kubeconfig
-nvkectl config set-site --name podvm --url http://localhost:8080 --kubeconfig "${PWD}/podvm.kubeconfig"
+nvkectl config set-site --name podvm --url "http://localhost:${API_PORT}" --kubeconfig "${PWD}/podvm.kubeconfig"
 nvkectl create cluster -f cli/examples/podvm-cluster.yaml
 ```
+
+`API_PORT` is the local port of the port forward. Take another free port when
+something on the machine already listens on 8080.
 
 `kubectl --context kind-podvm -n podvm-clusters get pods` shows one pod for each
 control plane node. `nvkectl get clusters` shows the cluster as `Provisioned`
