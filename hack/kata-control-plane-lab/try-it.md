@@ -462,6 +462,7 @@ docker ps --format '{{.Names}}'
 ## Known obstacles
 
 - **A firewall that drops forwarded packets from a Docker bridge.** Then no container reaches the internet. A kind node cannot install D-Bus or pull an image, a new node cannot pull, and the build containers of Kata cannot download. Step 1 shows it. The guide has no way around it.
+- **A resolver that a container cannot reach.** Docker gives a container the name servers of the machine. If the name server of the machine answers only on a VPN interface, step 1 fails with `bad address`, also when the firewall is open. Give the Docker daemon a name server that a container reaches, with its `dns` setting.
 - **A Docker with no `buildx`.** The controller image and the provider image need it. Install the `buildx` plugin of Docker.
 - **A proxy.** Docker, the kind nodes and the nodes of the new cluster each need the proxy settings. This guide does not set them.
 - **`kind load docker-image` fails.** With the containerd image store of Docker, kind cannot import an image that has one platform. `install-capnico.sh` uses `kind load` for the CAPNICo image. If it fails, the image `cluster-api-provider-nico:local` is built and not loaded. Load it with the `load` helper of Part 2. Then run the `install-capnico.sh` line of the README again with `KIND_BIN=true` in front, so that the script skips its own load.
