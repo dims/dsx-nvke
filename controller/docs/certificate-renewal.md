@@ -83,7 +83,10 @@ cancellation on a disconnected context before the node's postflight. A drain
 failure stops the cycle before any renewal is dispatched. A restore failure
 fails the cycle for that node even if renewal succeeded, and the message
 records it; it does not retain the cluster mutation lock, which only tracks
-unconfirmed renewal work. Nodes without kube-vip skip the drain. A cluster with
+unconfirmed renewal work. Nodes without kube-vip skip the drain, unless their
+node agent has a
+[control plane endpoint gate](../../agent/README.md#control-plane-endpoint-gate),
+which the drain closes and the restore opens. A cluster with
 a single control-plane node is renewed without the drain, since there is no
 other node for workers to fail over to. An agent that predates the drain RPCs
 (`Unimplemented`) fails the cycle, as it does for the etcd-encryption and OIDC
