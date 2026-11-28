@@ -74,6 +74,10 @@ const (
 	// it answers.
 	PodRunningReason = "PodRunning"
 
+	// NodeProviderIDConflictReason means the Node of the new cluster already
+	// has a provider ID that does not match its PodVMMachine.
+	NodeProviderIDConflictReason = "NodeProviderIDConflict"
+
 	// DeletingReason means the provider deletes the pod, the volume claims
 	// and the copy of the bootstrap Secret of a machine that is being deleted.
 	DeletingReason = "Deleting"
