@@ -188,6 +188,16 @@ func nodeAgentAnswers(pod *corev1.Pod) bool {
 	return false
 }
 
+// deletePod deletes exactly the pod that the caller saw. The UID guards
+// against a pod with the same name that was made in the meantime.
+func (r *MachineReconciler) deletePod(ctx context.Context, pod *corev1.Pod) error {
+	err := r.client.Delete(ctx, pod, client.Preconditions{UID: &pod.UID})
+	if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
+		return fmt.Errorf("failed to delete Pod %s/%s: %w", pod.Namespace, pod.Name, err)
+	}
+	return nil
+}
+
 // createPodResources makes what a pod needs and then the pod: the copy of the
 // bootstrap Secret, the two volume claims, the pod. Each step leaves an object
 // that exists as it is, so the pod of a lost pod gets the claims and the
