@@ -1,6 +1,6 @@
 # Branches to share: NVKE control plane nodes as Kata pods
 
-Last update: 2026-11-28, 08:54 local time. Each tip in the state table was the tip of its branch on the fork at that time (fetched at 08:54).
+Last update: 2026-11-28, 08:55 local time. Each tip in the state table was the tip of its branch on the fork at that time (fetched at 08:55).
 
 This page lists the only branches that the larger team needs. Each of the eleven is meant to become one pull request. No pull request is open yet. One more branch, `integration/control-plane-kata-pods`, holds the commits of the ten NVKE branches together, for a person who wants to try the feature. It is not for a pull request. Every other branch on the two forks is lab material and is not for sharing.
 
@@ -56,7 +56,7 @@ https://github.com/dims/dsx-nvke/tree/integration/control-plane-kata-pods
 - It is built again after each change of a branch, so its history is rewritten. Do not base work on it.
 - The guide for a first run is `try-it.md`, next to this page. It is written for a person outside the team who has only the two public forks. Nothing of it ran from start to end yet, and each step has a mark for what ran.
 - Check at 08:54 on 2026-11-28: `make build` passes for all modules. The tests of the agent module and of the provider module pass. The CLI test decodes both example requests of branch 11. The deploy list check and the docs check pass.
-- Kata Containers has its own integration branch, because the guest needs two changes of the Kata agent: https://github.com/dims/kata-containers/tree/integration/control-plane-kata-pods (tip `96a8d905b`). It is Kata 4.4.0 plus the commit of branch 10 and a backport of the open upstream pull request 13627 of another author, which lets an exec work after systemd starts in the container.
+- Kata Containers has its own integration branch, because the guest needs two changes of the Kata agent: https://github.com/dims/kata-containers/tree/integration/control-plane-kata-pods (tip `96a8d905b`). It is Kata 4.4.0 plus the commit of branch 10 and a backport of the upstream pull request 13627 of another author (still open on 2026-11-28, as is the upstream issue 14062 for the fault of branch 10), which lets an exec work after systemd starts in the container.
 
 ## What each branch does
 
