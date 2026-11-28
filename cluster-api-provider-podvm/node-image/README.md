@@ -26,9 +26,11 @@ input that this image needs:
 ```bash
 cd controller
 bundles="$PWD/.local/podvm-bundles"
+arch="$(go env GOARCH)"
 
-# The SPIRE agent bundle and the OVN-Kubernetes packages, from public sources.
-CNI_PLUGIN=ovn-kubernetes BUNDLE_ARCH=amd64 bash hack/ci/prepare-capd-bundles.sh "$bundles"
+# The SPIRE agent bundle and the OVN-Kubernetes packages, from public sources,
+# for the architecture of the machine.
+CNI_PLUGIN=ovn-kubernetes BUNDLE_ARCH="$arch" bash hack/ci/prepare-capd-bundles.sh "$bundles"
 
 # CAPD_SPIRE_ATTESTATION_METHOD   join token in place of the default, tpm
 # CAPD_NODE_AGENT_LOCAL_BUILD     the node agent of this tree, from agent/
@@ -40,8 +42,8 @@ CNI_PLUGIN=ovn-kubernetes BUNDLE_ARCH=amd64 bash hack/ci/prepare-capd-bundles.sh
 CAPD_SPIRE_ATTESTATION_METHOD=joinToken \
 CAPD_NODE_AGENT_LOCAL_BUILD=true \
 SPIRE_AGENT_BUNDLE_PATH="$bundles/spire-agent.tgz" \
-CAPD_CNI_CHARTS_DEB_PATH="$bundles/nvke-cni-ovn-charts-2.4.2_2.4.2_amd64.deb" \
-CAPD_CNI_IMAGES_DEB_PATH="$bundles/nvke-cni-ovn-images-2.4.2_2.4.2_amd64.deb" \
+CAPD_CNI_CHARTS_DEB_PATH="$bundles/nvke-cni-ovn-charts-2.4.2_2.4.2_${arch}.deb" \
+CAPD_CNI_IMAGES_DEB_PATH="$bundles/nvke-cni-ovn-images-2.4.2_2.4.2_${arch}.deb" \
 CAPD_HELM_DEB_PATH="$bundles/nke-e2e-helm.deb" \
 CAPD_KINDEST_NODE_IMAGE=cwe-capd-kindest-node:local \
   bash hack/capd-kindest-node/build-image.sh
@@ -166,7 +168,7 @@ git clone --depth 1 --branch 4.4.0 https://github.com/kata-containers/kata-conta
 cp "$nvke"/cluster-api-provider-podvm/node-image/kernel/*.conf \
   kata-containers/tools/packaging/kernel/configs/fragments/common/
 build() {
-  kata-containers/tools/packaging/kernel/build-kernel.sh -a x86_64 -v v6.18.62 -f \
+  kata-containers/tools/packaging/kernel/build-kernel.sh -a "$(uname -m)" -v v6.18.62 -f \
     -u https://cdn.kernel.org/pub/linux/kernel/v6.x/ -x -m "$@"
 }
 build setup
