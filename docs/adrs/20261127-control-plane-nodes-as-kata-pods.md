@@ -51,7 +51,7 @@ The decision gives up the following:
 - The control plane fails with its host cluster. Nothing moves a pod after the loss of a host node.
 - Each control plane node carries a node userspace, a kubelet and a second container runtime, which a hosted control plane with no kubelet does not need.
 - The tests exist only in the lab above. No test ran in CI, on a site, on arm64, or with this address design on a machine with no nested virtualization.
-- A cluster has one provider, so the decision does not solve workers on bare metal in the same cluster. The lab tested one worker that is also a pod.
+- Workers on bare metal in the same cluster are shown only with the NICo simulator. In the lab, one request on the `infra` path made a cluster with the control plane in pods and two workers that [nico-sim](../../controller/nico-sim/README.md) made as containers, through the NICo provider for Cluster API and with no change to NVKE. Pod traffic between the two kinds of node, the calls of each API server to the workers, a worker reboot and a delete passed. A pool on the `infra` path has none of the functions of the `nico` request object, and no test ran with real hardware.
 
 ## Options considered
 
