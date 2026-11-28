@@ -438,6 +438,14 @@ func (r *MachineReconciler) reconcilePod(
 			fmt.Sprintf("Pod %s/%s ended in the phase %s and is replaced", pod.Namespace, pod.Name, pod.Status.Phase))
 
 	case pod.Status.Phase != corev1.PodRunning:
+		if problem := unschedulableProblem(pod, ownerMachine); problem != nil {
+			// The scheduler keeps the pod and tries again when the host
+			// cluster changes. The event of the pod status starts the
+			// reconcile that sees the pod with a node, so there is no requeue.
+			logger.Info("Scheduler cannot place the pod", "pod", pod.Name, "reason", problem.reason,
+				"failureDomain", ownerMachine.Spec.FailureDomain, "message", problem.message)
+			return nil, ctrl.Result{}, r.setNotReady(ctx, machine, problem.reason, problem.message)
+		}
 		return nil, ctrl.Result{}, r.setNotReady(ctx, machine, infrav1.WaitingForPodReason,
 			fmt.Sprintf("Pod %s/%s does not run yet", pod.Namespace, pod.Name))
 
