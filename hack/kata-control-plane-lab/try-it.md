@@ -34,7 +34,7 @@ State of 2026-11-28. A first run is in work, on one arm64 machine with `/dev/kvm
 - On arm64 `up.sh` also gives each kind node a larger `/dev/shm`. QEMU keeps the memory of a guest there, and a container has 64 MB of it.
 - Each mark, each time and each number of this guide is from amd64.
 - Steps that passed on arm64: 1 to 13, each as it is written here, on 2026-11-28. The guest kernel of step 3 has the same file name there. Step 4 took 11 minutes, and the base image of step 5 has 1.1 GB. The pod of step 8 runs on QEMU and prints the same kernel version.
-- Scenarios that passed on arm64: 1, 2, 3 and 4, on 2026-11-28. The status was `Provisioned` after 2 minutes and 26 seconds, and each of the four nodes was Ready after 3 minutes and 47 seconds. In scenario 3 the node was Ready again after 55 seconds. The other scenarios did not run there yet.
+- Scenarios that passed on arm64: 1, 2, 3, 4 and 5, on 2026-11-28. The status was `Provisioned` after 2 minutes and 26 seconds, and each of the four nodes was Ready after 3 minutes and 47 seconds. In scenario 3 the node was Ready again after 55 seconds. The rollout of scenario 5 took 8 minutes and 46 seconds, with no failed call. The other scenarios did not run there yet.
 
 ## The marks
 
