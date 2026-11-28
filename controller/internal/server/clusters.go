@@ -320,11 +320,8 @@ func (s *clusterService) preflightCheckCreateClusterRequest(
 	if err := validatePodCIDRCapacity(network.podCIDRPrefixes, desiredNodes, cpSurge); err != nil {
 		return resolvedClusterNetwork{}, newBadRequestErrorf("%s", err)
 	}
-	controlPlaneVIP := strings.TrimSpace(req.ControlPlaneVIP)
-	if controlPlaneVIP != "" {
-		if err := network.validateControlPlaneVIP(controlPlaneVIP); err != nil {
-			return resolvedClusterNetwork{}, newBadRequestErrorf("%s", err)
-		}
+	if err := network.validateAPIServerEndpointFields(strings.TrimSpace(req.ControlPlaneVIP), req.ControlPlaneEndpoint); err != nil {
+		return resolvedClusterNetwork{}, newBadRequestErrorf("%s", err)
 	}
 
 	// When the control plane is configured at the cluster level for a Forge
