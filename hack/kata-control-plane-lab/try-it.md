@@ -5,7 +5,7 @@ State of 2026-11-28. The guide uses two public branches:
 - `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `7da67615`
 - `integration/control-plane-kata-pods` of `https://github.com/dims/kata-containers`, at `96a8d905b`
 
-**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Scenarios 1 to 4 passed too. Each other scenario ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
+**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Scenarios 1 to 5 passed too. Each other scenario ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
 
 ## What the feature is
 
@@ -335,7 +335,7 @@ nvkectl patch cluster podvm-example --patch 'controlPlaneConfig: {desiredCount: 
 
 ### Scenario 5, roll the control plane to a new image
 
-**Lab.** The lab sent the same patch with `curl`.
+**Ran in the first run of 2026-11-28.** The load of the tag took 1 min 45 s.
 
 ```bash
 docker tag podvm-node:local podvm-node:local-b && load podvm-node:local-b
@@ -349,7 +349,7 @@ while sleep 1; do kc get --raw /readyz --request-timeout=3s >/dev/null && echo o
 ```
 
 - **Pass.** NVKE replaces the three control plane nodes one after the other. `kh -n podvm-clusters get pods -o jsonpath='{.items[*].spec.containers[0].image}'` shows the new tag three times. The loop prints no `FAIL`.
-- **Time.** The lab measured 695 s, and 701 of 701 calls with an answer.
+- **Time.** In the first run the rollout took 10 min 30 s, and 620 of 620 calls had an answer. The status of the cluster is `Recycling` during the rollout.
 - The provider README, section "Roll to a new image", has the rules of this request.
 
 ### Scenario 6, turn etcd encryption on
