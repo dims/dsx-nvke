@@ -1,6 +1,6 @@
 # Summary of the lab that ran NVKE control plane nodes as Kata pods
 
-The summary has the date 2026-11-27.
+The summary has the date 2026-11-27. The state of the branches in it is of 2026-11-28 at 08:10.
 
 ## Conclusion
 
@@ -8,7 +8,7 @@ NVKE can run each control plane node of a tenant cluster as one Kata pod on a se
 
 In the lab, one request to the NVKE API made a cluster with three control plane nodes as Kata pods. NVKE then ran its lifecycle flows on such a cluster, from a node replace to a Kubernetes upgrade, with the same node agent and the same workflows as on bare metal.
 
-The lab ran on two amd64 machines. The tests of phase 2 and phase 3 ran on a machine with nested virtualization, where each Kata virtual machine runs inside another virtual machine. The tests found two gaps and two defects of NVKE. All four have a change on a branch, and each change passes its test in the lab.
+The lab ran on two amd64 machines. The tests of phase 2 and phase 3 ran on a machine with nested virtualization, where each Kata virtual machine runs inside another virtual machine. The tests found two gaps and two defects of NVKE. All four have a change on a branch, and the form of each change that the lab ran passed its test. The branches were reworked after the tests, and the lab has not run the final forms (section "What exists as code").
 
 Phase 3 added workers of a second kind to the same cluster. With the NICo simulator of the repository in the place of bare metal machines, one request made a cluster with the control plane in pods and the workers from NICo, with no new NVKE code.
 
@@ -23,11 +23,13 @@ A new provider, `cluster-api-provider-podvm`, makes the pods. It is a Cluster AP
 - A fixed node address on a second network interface, with no address translation between the nodes.
 - A copy of the bootstrap data of NVKE.
 
-The API servers of a cluster share one endpoint address. A LoadBalancer Service of the host cluster holds the address and forwards only to pods with a ready API server. The caller gives the address to NVKE in a new request field, `controlPlaneEndpoint`.
+The API servers of a cluster share one endpoint address. A LoadBalancer Service of the host cluster holds the address and forwards only to pods with a ready API server. The caller gives the address to NVKE in a new request field, `controlPlaneEndpoint`. In the lab a person made that Service before the request. The provider branch now has code that makes the Service by itself, and that code has not run in a cluster.
 
 ## Results
 
 Phase 0 tested one node in a virtual machine of Kata Containers 4.4.0. In phase 1, a script made three pods, and NVKE joined them through its existing `infra` path, which accepts Cluster API manifests from the caller. In phase 2, the provider made the pods. In phase 3, the workers came from the NICo simulator, which starts each machine as a container. The times of phase 2 come from the machine with nested virtualization, so they do not compare with other machines. The sources are files in the lab notes.
+
+The Source column of the tables names files of the lab notes. Some of them are also on the public fork, in the folder `hack/kata-control-plane-lab/` of the branch `test/kata-control-plane-lab`, as a snapshot of 2026-11-27. The task list, the run log and the review reports are not public.
 
 | Phase | Test | Result | Source |
 |---|---|---|---|
@@ -45,7 +47,7 @@ Phase 0 tested one node in a virtual machine of Kata Containers 4.4.0. In phase 
 | 2 | One worker node as a pod | The node was Ready after 78 s, and five tests passed. A reboot took 31 minutes, and the lab did not test the NVKE setting that removes the wait. | `results/phase2-results.md` |
 | 2 | The same flows with the change for the first gap | In the forced renewal the endpoint answered 510 of 510 calls, and the worker stayed Ready. It answered 356 of 356 calls while encryption was turned on, and 968 of 968 and 1630 of 1630 in two rollouts. | `results/phase2-results.md`, section 1c |
 | 2 | A rollout with no room on one node of the host cluster, with the change for the second gap | NVKE moved the waiting node to another node of the host cluster 15 minutes after it made the node, and the rollout ended with no operator step after 1637 s. | `results/phase2-results.md`, section 1c |
-| 2 | A rollout after encryption was turned on | With the agent as it is, the first new node never joined. With the second agent fix, the three nodes joined at the first attempt, and a new Secret was stored encrypted. | `results/phase2-results.md`, section 1d |
+| 2 | A rollout after encryption was turned on | With the agent as it is, the first new node never joined. With the first form of the second agent fix, the three nodes joined at the first attempt, and a new Secret was stored encrypted. | `results/phase2-results.md`, section 1d |
 | 3 | One request makes a cluster with the control plane in pods and two workers from the NICo simulator | The cluster had five good nodes 5 min 22 s after the request. NVKE needed no new code. | `results/phase3-results.md` |
 | 3 | Traffic between the two kinds of node | Pod traffic passed on 20 of 20 lines. Each of the three API servers reached each worker for logs, exec and port forward, with no proxy. | `results/phase3-results.md` |
 | 3 | Workers through NVKE | NVKE added a worker in 57 s and refilled a deleted worker in 68 s. A reboot of a worker took 61 s with one NVKE setting. A delete of the cluster left nothing. | `results/phase3-results.md` |
@@ -57,7 +59,7 @@ Phase 0 tested one node in a virtual machine of Kata Containers 4.4.0. In phase 
 - The node agent has a defect in the kubeadm step that uploads the certificates. The agent gives kubeadm a config for the step only on the first control plane node. Since kubeadm 1.33.12, 1.34.8, 1.35.5 and 1.36.1, kubeadm with no config takes the address of the default route interface. When the node address is on another interface, no new control plane node can join after the first node is gone (`results/phase2-results.md`).
 - The node agent has a second defect, in the flow that turns etcd encryption on for a cluster that exists. The agent rewrites the stored kubeadm configuration and replaces its whole API server section. In the lab 16 flags and 3 volumes were lost, and the one volume that the agent wrote names a file that no code makes. After that no new control plane node can join. A cluster with encryption from its creation does not have the defect, by the source and by a check with kubeadm (`results/phase2-encryption-join-fix.md`).
 - NVKE reports a cluster as provisioned when the pod network between its nodes does not work, because no step checks it (`results/phase1-results.md`). Phase 3 saw the same for a worker.
-- The NICo simulator loses a race at the start of a container machine: it runs the start commands of a machine before systemd is ready. In the lab a worker then never joined, in three of four starts. A fix is on a branch and passed 8 of 8 worker starts (`results/phase3-nico-sim-race-fix.md`).
+- The NICo simulator loses a race at the start of a container machine: it runs the start commands of a machine before systemd is ready. In the lab one worker then never joined, and systemd was not ready at the start of the commands in three of the first four worker starts. A fix is on a branch and passed 8 of 8 worker starts (`results/phase3-nico-sim-race-fix.md`).
 - A node that runs as a container can touch the devices of its host through the node agent. Without one flag the agent runs a device rescan at each start, and NVKE replaces the agent arguments of the image. The lab image forces the flag (`results/phase3-results.md`).
 - NVKE cannot delete a cluster through its API alone when the cluster uses `cluster-api-provider-provisioned`, the provider for hosts that exist before the request (`results/phase1-results.md`).
 - The forced certificate renewal and the key rotation have no API request. The controller and the agent have no etcd backup or restore. The docs name a bundle `etcd-manager` for snapshots, its source is not in the repository, and the lab did not test it (`results/phase2-results.md`).
@@ -71,19 +73,24 @@ Phase 0 tested one node in a virtual machine of Kata Containers 4.4.0. In phase 
 
 The branches are on a public fork of the NVKE repository, `github.com/dims/dsx-nvke`, on top of the main branch. None has a pull request.
 
+State on 2026-11-28 at 08:10: the branches were reworked for pull requests after the last lab test, and three fresh reviews read them. Each code branch has other commits than the lab ran, apart from the capacity signal and the code of the simulator fix. The lab ran the forms before the rework, which stay on the fork under `lab/` names. `branches-to-share.md` lists each branch with its tip and its commits. The request field got the points of its review at 08:05. Three branches are still in work today (the capacity signal, the provider and the node image), so their commits change again.
+
 | Branch | Content | Source |
 |---|---|---|
-| `feat/cluster-api-provider-podvm` | The provider as a new module, with 81 test functions | `results/phase2-results.md`, `results/phase2-gaps-capacity.md` |
-| `fix/agent-upload-certs-config` | The first fix of the node agent, in one commit that needs no other branch | `results/phase2-agent-fix.md` |
-| `fix/agent-encryption-join-config` | The second fix of the node agent, in one commit that needs no other branch | `results/phase2-encryption-join-fix.md` |
-| `feat/control-plane-endpoint` | The request field `controlPlaneEndpoint`, in three commits | `results/phase1-results.md` |
-| `feat/agent-endpoint-health-gate` | The health gate in the node agent | `results/phase2-gaps-agent-gate.md` |
-| `feat/capi-failure-domain-unavailable` | The capacity signal on the side of NVKE | `results/phase2-gaps-capacity.md` |
+| `feat/cluster-api-provider-podvm` | The provider as a new module, with 92 test functions, in 21 commits. The first 15 commits have the Go code that the lab ran. Five commits are new: the provider makes the Service of the shared endpoint by itself, the controller chart can grant NVKE the rights for the kinds of the provider, and the module has samples and an install text. The new commits have not run in a cluster | `results/phase2-results.md`, `results/phase2-gaps-capacity.md`, `results/review-provider-branches.md` |
+| `feat/podvm-node-image` | The node image for the pods, inside the provider module, in three commits on top of the provider branch. The image builds, and it has not run in a pod. A fresh review found two faults, which are in work | `results/phase2-node-image-branch.md`, `results/review-provider-branches.md` |
+| `fix/agent-upload-certs-config` | The first fix of the node agent, in one commit that needs no other branch. It is smaller than the form that the lab ran | `results/phase2-agent-fix.md`, `results/review-agent-branches.md` |
+| `fix/agent-encryption-join-config` | The second fix of the node agent, in one commit that needs no other branch. It has a new, small form: the agent no longer writes the stored kubeadm configuration in this flow, because the controller already merges the encryption settings at the end of the same workflow. The lab ran the first form, a merge in the agent | `results/phase2-encryption-join-fix.md`, `results/review-agent-branches.md` |
+| `feat/control-plane-endpoint` | The request field `controlPlaneEndpoint`, in eight commits, in a smaller form than the lab ran. A fresh review found one must fix: nine sentences of the API reference named only the older VIP field. It is corrected on the fork since 2026-11-28, 08:05, with a test for the rule that such a cluster gets no kube-vip | `results/phase1-results.md`, `results/review-controller-branches.md` |
+| `feat/agent-endpoint-health-gate` | The health gate in the node agent, in four commits, with less code than the lab ran and the same behavior by its tests | `results/phase2-gaps-agent-gate.md`, `results/review-agent-branches.md` |
+| `feat/capi-failure-domain-unavailable` | The capacity signal on the side of NVKE. Small changes from a fresh review are in work | `results/phase2-gaps-capacity.md`, `results/review-controller-branches.md` |
 | `fix/nico-sim-wait-for-systemd` | The fix of the NICo simulator, in one commit that needs no other branch | `results/phase3-nico-sim-race-fix.md` |
 | `docs/adr-control-plane-nodes-as-kata-pods` | A proposed architecture decision record for the repository | `tasks/todo.md` |
-| `test/kata-control-plane-lab` | The lab scripts, the results and the node image for pods | `tasks/todo.md` |
+| `test/kata-control-plane-lab` | The lab scripts, the results and the node image that the lab ran | `tasks/todo.md` |
 
-A fix of the Kata agent from phase 0 is on the branch `lab/agent-kill-child-cgroups` of `github.com/dims/kata-containers` (`tasks/todo.md`).
+A fix of the Kata agent from phase 0 is on the branch `fix/agent-kill-child-cgroups` of `github.com/dims/kata-containers`, in one commit. The branch `lab/agent-kill-child-cgroups` there has that commit and a second change for exec, which the lab also ran (`tasks/todo.md`).
+
+Two branches are for a person who wants to try the feature, and not for a pull request. Both have the name `integration/control-plane-kata-pods`. The one on `github.com/dims/dsx-nvke` has the commits of the nine NVKE branches for pull requests in one tree, 41 commits on the main commit. It is built again after each change of a branch. The one on `github.com/dims/kata-containers` is Kata Containers 4.4.0 with the two changes of the Kata agent.
 
 ## What is open and what the lab cannot show
 
@@ -95,5 +102,9 @@ The following parts do not exist yet (`results/phase2-results.md`):
 - A reaction to the loss of a node of the host cluster. The control plane fails with its host cluster.
 - Workers on real bare metal in the same cluster. Phase 3 showed the form with the NICo simulator only. It used the `infra` path, where a worker pool has none of the functions of a NICo pool in NVKE, such as releases and placement retries. NVKE needs a decision on the request form for a product.
 - A repair for a cluster that already lost its API server settings when encryption was turned on. The second agent fix stops the loss and does not bring the settings back.
+- A run of the final branches (state on 2026-11-28 at 08:10). The lab ran the forms before the rework. The new form of the second agent fix, the Service that the provider makes, and the node image of the new branch have not run in a cluster.
+- The points of the three fresh reviews on three branches, which are in work: two faults in the node image, and smaller points in the provider and in the capacity signal. The one must fix, in the API reference text of the request field, is corrected since 2026-11-28, 08:05.
+- A deploy path of the repository with the pod provider, as the repository has one for its container nodes in the end to end tests. It is in work on a new branch, `feat/podvm-deploy-path`, which is not on the fork yet. A person outside the team cannot bring up the feature from the public repositories alone today (`results/try-it-public-gaps.md`).
+- An issue for each pull request. The repository asks for one, and for a new feature the issue must be agreed before the work. No issue exists.
 
 The lab cannot show the behavior on a production site, in CI, on arm64, or without nested virtualization for the final design. It also cannot show etcd under a production load, or failure cases such as the loss of a node of the host cluster. Most tests of the changes ran one time.

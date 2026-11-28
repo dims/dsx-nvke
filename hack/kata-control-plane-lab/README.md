@@ -1,5 +1,7 @@
 # Kata control plane lab, phase 0 to phase 3
 
+The branches of this fork that are meant for pull requests are listed in `branches-to-share.md`, with what each commit does. The branch `integration/control-plane-kata-pods` has the commits of those branches in one tree, for a person who wants to try the feature. Every other branch here is lab material.
+
 Phase 3 passes its six lab pass rules on 2026-11-27. Start with `results/phase3-results.md`. One request to NVKE makes a cluster with three control plane nodes as Kata pods and two workers that the NICo provider for Cluster API makes through the NICo simulator of the repository (`controller/nico-sim`), with no new NVKE code. Pod traffic passes between the two kinds of node, each API server reaches each worker with no proxy, NVKE adds, removes and reboots a worker, and a delete leaves nothing. The simulator stands in for bare metal machines, and the request uses the `infra` path. The tests found a race in the simulator, with a fix on the branch `fix/nico-sim-wait-for-systemd` of this fork (`results/phase3-nico-sim-race-fix.md`). The fix passed 8 of 8 worker starts in the lab. A Konnectivity prototype in the lab carried logs, exec and port forward to workers that the control plane pods could not reach, and the pod network between the two stayed broken, so this design needs a routed network and then no Konnectivity (`results/phase3-results.md`, section 4, and `results/phase3-konnectivity-reading.md`). The lab files are in `lab/phase3-run/` and `lab/phase3-konn/`.
 
 For a short summary for readers with no context, read `summary.md` first. On 2026-11-27 the two gaps of phase 2 got code on branches of this fork, and each change passes its test in the lab: a health gate in the node agent (`feat/agent-endpoint-health-gate`, `results/phase2-gaps-agent-gate.md`) and a capacity signal (`feat/capi-failure-domain-unavailable` and `feat/cluster-api-provider-podvm`, `results/phase2-gaps-capacity.md`). The tests found one more defect of the node agent: after etcd encryption is turned on for a cluster that exists, no new control plane node can join. Its fix is on the branch `fix/agent-encryption-join-config` (`results/phase2-encryption-join-fix.md`). The test results are in `results/phase2-results.md`, sections 1c and 1d, and in `lab/phase2-gaps-run/result.md`.
@@ -64,23 +66,28 @@ Phase 1 meets its pass rule. Its goal is a cluster that NVKE makes with three co
 | `lab/phase2-agentfix-run/` | Phase 2, step 6 again with the fixed NVKE agent and nothing by hand: the first node replace, a join after a pod restart, and the rollout pass |
 | `lab/phase2-worker-run/` | Phase 2, step 8: one worker through a node pool, traffic with the worker, the reboot through NVKE, a lost worker pod, and the removal |
 | `lab/phase2-gate-run/` | Phase 2, the other flows of the exit gate: etcd encryption, key rotation, a forced certificate renewal, and a Kubernetes version upgrade |
-| `lab/patches/` | Two patches to the Kata agent. The same commits are on the branch `lab/agent-kill-child-cgroups` of `github.com/dims/kata-containers` |
-| `results/` | The results of phase 0 and the source readings. `phase1-source-reading.md` has the NVKE source facts for phase 1. `phase1-endpoint-plan.md` and `phase1-endpoint-change.md` are the plan and the report for the request field `controlPlaneEndpoint`. `phase2-source-reading.md` has the source facts for the provider, `phase2-provider-report.md` is the report of the provider module, and `phase2-agent-fix.md` is the report of the fix in the NVKE node agent |
+| `lab/phase2-gaps-run/` | Phase 2, the two gaps: the tests of the health gate in the node agent and of the capacity signal, the guest kernel build with socket diagnostics, and the test of the fix for a join after encryption is turned on |
+| `lab/phase3-run/` | Phase 3: one cluster with the control plane in pods and workers from the NICo simulator, the worker flows, the control plane flows with the workers present, and the run of the fixed simulator |
+| `lab/phase3-konn/` | Phase 3: the Konnectivity prototype |
+| `lab/patches/` | Two patches to the Kata agent. The same commits are on the branches `lab/agent-kill-child-cgroups` and `integration/control-plane-kata-pods` of `github.com/dims/kata-containers`. The first one alone is the branch `fix/agent-kill-child-cgroups` there |
+| `branches-to-share.md` | The branches of this fork that are meant for pull requests, with their tips and what each commit does |
+| `summary.md` | A summary of the lab for readers with no context |
+| `results/` | The results of phase 0 and the source readings. `phase1-source-reading.md` has the NVKE source facts for phase 1. `phase1-endpoint-plan.md` and `phase1-endpoint-change.md` are the plan and the report for the request field `controlPlaneEndpoint`. `phase2-source-reading.md` has the source facts for the provider, `phase2-provider-report.md` is the report of the provider module, and `phase2-agent-fix.md` is the report of the fix in the NVKE node agent. The reports of the later changes are `phase2-gaps-agent-gate.md`, `phase2-gaps-capacity.md`, `phase2-encryption-join-fix.md`, `phase2-node-image-branch.md` and `phase3-nico-sim-race-fix.md`. The results of each phase are `phase0-results.md` to `phase3-results.md`. A report describes its branch at the time of the report. `branches-to-share.md` has the state of now |
 
 Each gate folder has a `report.md` with the method, the versions, the numbers and what is not tested.
 
 ## Versions
 
-NVKE at commit `bcc4376f`, Kubernetes v1.36.4, kind v0.34.0 with `kindest/node:v1.36.4`, Kata Containers 4.4.0 with Cloud Hypervisor v54.1 and guest kernel 6.18.62, MetalLB 0.16.2, SPIRE 1.14.1.
+NVKE at commit `bcc4376f` in phase 0 and phase 1. In phase 2 and phase 3 the controller and the node agent came from branches of this fork that sit on the main commit `d625fcfa`, and the node image kept its base of `bcc4376f`. Kubernetes v1.36.4, and v1.35.5 as the start of the upgrade test. kind v0.34.0 with `kindest/node:v1.36.4`, Kata Containers 4.4.0 with Cloud Hypervisor v54.1 and guest kernel 6.18.62, MetalLB 0.16.2, SPIRE 1.14.1. Phase 3 added the NICo provider for Cluster API v0.3.0-rc.1 and the Konnectivity images v0.34.0.
 
 ## Before you run a script
 
 - The scripts have the paths of the lab machine. The work folder is `/scratch/kata-cp`, and some lines name a notes folder in a home directory. Change them first.
 - The reports link to a plan, a run log and an evidence file. Those files are not in this folder.
-- The six Go programs (`lab/gate1-nvke/client`, `lab/gate2/patcher`, `lab/gate3/uds-probe`, `lab/phase1-cni/client`, `lab/phase1-dry/client`, `lab/phase1-helper`) are separate modules and are not in `go.work`. Build each one with `GOWORK=off go build`. The three clients use the agent module of this repository through a `replace` line.
+- The seven Go programs (`lab/gate1-nvke/client`, `lab/gate2/patcher`, `lab/gate3/uds-probe`, `lab/phase1-cni/client`, `lab/phase1-dry/client`, `lab/phase1-helper`, `lab/phase2-node-image/bootstrap`) are separate modules and are not in `go.work`. Build each one with `GOWORK=off go build`. The three clients use the agent module of this repository through a `replace` line.
 - `lab/phase1-stack/install.sh` makes its passwords at run time in a `secrets` folder of the work folder. That folder is not here.
 - `lab/gate1-nvke/run.sh` and `lab/gate3/nvke-harness/run.sh` check a port with the socket device path of bash. An endpoint security tool can read that as a reverse shell and stop the shell. Replace that line with `nc -z` or `curl` on such a machine.
-- The lab machine is one workstation. The reports have its addresses and device names.
+- The lab ran on two machines: a workstation, and from phase 1 on a second test machine where Kata runs with nested virtualization. Phase 2 and phase 3 ran on the second machine. The reports have the addresses and the device names of the lab networks.
 
 ## Repository checks on this branch
 
