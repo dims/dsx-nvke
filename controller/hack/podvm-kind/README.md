@@ -13,6 +13,7 @@ same set on one Linux machine, in a kind cluster, so that the
 | `down.sh` | Removes what `up.sh` made |
 | `kind.yaml` | The kind cluster: one control plane node and three workers |
 | `kata-deploy-values.yaml` | Values for the `kata-deploy` chart: the runtime class `kata-podvm` |
+| `kata-deploy-values-arm64.yaml` | What differs on arm64: the runtime class sits on QEMU, because Kata 4.4.0 has Cloud Hypervisor for amd64 only |
 | `metallb.yaml` | The address pool of the control plane Service |
 | `local-static-provisioner-values.yaml` | Values for the local static provisioner: the storage class `podvm-block` |
 

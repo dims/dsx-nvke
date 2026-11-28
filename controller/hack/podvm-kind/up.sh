@@ -158,7 +158,12 @@ step_multus() {
 }
 
 step_kata() {
-  local node file
+  local node file values=(--values "${HERE}/kata-deploy-values.yaml")
+  # Kata has Cloud Hypervisor with its Rust runtime for amd64 only. On arm64
+  # the runtime class sits on QEMU.
+  if [[ "$(go_arch)" == arm64 ]]; then
+    values+=(--values "${HERE}/kata-deploy-values-arm64.yaml")
+  fi
   for file in vmlinux kata-containers.img; do
     [[ -s "${KATA_GUEST_DIR}/${file}" ]] || die "no ${KATA_GUEST_DIR}/${file}: README.md says how to build it"
   done
@@ -172,7 +177,7 @@ step_kata() {
   log "Kata Containers ${KATA_VERSION}"
   helm --kube-context "kind-${KIND_CLUSTER_NAME}" upgrade --install kata-deploy \
     oci://ghcr.io/kata-containers/kata-deploy-charts/kata-deploy --version "${KATA_VERSION}" \
-    --namespace kube-system --values "${HERE}/kata-deploy-values.yaml" --wait --timeout 15m
+    --namespace kube-system "${values[@]}" --wait --timeout 15m
 }
 
 step_metallb() {
