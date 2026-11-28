@@ -8,6 +8,9 @@
 # Rust runtime. It has what cluster-api-provider-podvm/node-image/README.md
 # asks of Kata: the guest kernel and the guest image that the reader builds,
 # direct I/O for block volumes, and a larger memory overhead.
+#
+# Kata has that configuration for amd64 only. On arm64 up.sh adds
+# kata-deploy-values-arm64.yaml, which puts the runtime on QEMU.
 k8sDistribution: k8s
 shims:
   disableAll: true
@@ -17,7 +20,6 @@ shims:
 # default that is not one of the shims above.
 defaultShim:
   amd64: clh-runtime-rs
-  arm64: clh-runtime-rs
 customRuntimes:
   enabled: true
   runtimes:

@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# What differs on arm64 from kata-deploy-values.yaml. up.sh gives the chart
+# this file after that one when the machine is arm64.
+#
+# Kata Containers 4.4.0 has the Cloud Hypervisor configuration of its Rust
+# runtime for amd64 only. On arm64 the custom runtime kata-podvm sits on the
+# QEMU configuration of the same runtime, with the same guest kernel, guest
+# image and block device setting. The runtime class keeps its name.
+shims:
+  clh-runtime-rs:
+    enabled: false
+  qemu-runtime-rs:
+    enabled: true
+defaultShim:
+  arm64: qemu-runtime-rs
+customRuntimes:
+  runtimes:
+    podvm:
+      baseConfig: qemu-runtime-rs
+      dropIn: |
+        [hypervisor.qemu]
+        kernel = "/opt/kata-podvm/vmlinux"
+        image = "/opt/kata-podvm/kata-containers.img"
+        block_device_cache_direct = true
