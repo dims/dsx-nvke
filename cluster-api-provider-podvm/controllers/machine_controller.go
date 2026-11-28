@@ -5,10 +5,12 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	infrav1 "github.com/dsx-ai-factory/nvke/cluster-api-provider-podvm/api/v1alpha1"
 )
@@ -43,6 +46,15 @@ const (
 	podVMClusterKind = "PodVMCluster"
 	podVMMachineKind = "PodVMMachine"
 )
+
+// machineProblem is a state that the provider reports in the Ready condition
+// and then waits on. It is not a failure of the reconcile.
+type machineProblem struct {
+	reason  string
+	message string
+}
+
+func (p *machineProblem) Error() string { return p.message }
 
 // MachineReconciler makes one pod, two volume claims and one copy of the
 // bootstrap Secret for each PodVMMachine, and it deletes them with the machine.
@@ -70,7 +82,7 @@ func NewMachineReconciler(k8sClient client.Client, apiReader client.Reader, logg
 // SetupWithManager registers the reconciler with a manager.
 //
 // The reconciler also watches the Machines, because the bootstrap data
-// arrives there.
+// arrives there, and the pods it made, because a lost pod must come back.
 //
 // One reconcile runs at a time. An address is safe from a second machine only
 // because one writer reads the used addresses and then takes a free one.
@@ -83,12 +95,29 @@ func (r *MachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				capiutil.MachineToInfrastructureMapFunc(infrav1.GroupVersion.WithKind(podVMMachineKind)),
 			),
 		).
+		Watches(
+			&corev1.Pod{},
+			handler.EnqueueRequestsFromMapFunc(podToMachine),
+		).
 		// Keep this at 1. Two workers can both read the used addresses before
 		// either one writes, and both then give the same address to their
 		// machines. No write fails, because each one goes to another object.
 		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		Named("podvm-machine").
 		Complete(r)
+}
+
+// podToMachine maps a pod to the PodVMMachine that its owner labels name. The
+// pod is in another namespace than the machine, so no owner reference exists.
+func podToMachine(_ context.Context, obj client.Object) []reconcile.Request {
+	labels := obj.GetLabels()
+	namespace, name := labels[infrav1.OwnerNamespaceLabel], labels[infrav1.OwnerNameLabel]
+	if namespace == "" || name == "" {
+		return nil
+	}
+	return []reconcile.Request{{
+		NamespacedName: client.ObjectKey{Namespace: namespace, Name: name},
+	}}
 }
 
 // Reconcile brings the pod of a machine to the state that the machine asks
@@ -140,7 +169,11 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 
-	return ctrl.Result{}, nil
+	pod, result, err := r.reconcilePod(ctx, machine, ownerMachine, infraCluster, logger)
+	if err != nil || pod == nil {
+		return result, err
+	}
+	return r.reconcileRunningPod(ctx, machine, pod, logger)
 }
 
 // infraClusterFor finds the PodVMCluster of a machine through the Cluster that
@@ -205,7 +238,7 @@ func (r *MachineReconciler) infraClusterFor(
 //
 // It does not write status.addresses. That field tells Cluster API and the
 // NVKE controller where to call the node, so it follows when the node agent
-// answers.
+// answers. See reconcileRunningPod.
 //
 // The set of used addresses is read directly from the API server, from every
 // PodVMMachine of every namespace. The cache can lag behind a write of the
@@ -275,6 +308,118 @@ func (r *MachineReconciler) allocateAddress(
 		"podName", machine.Status.PodName,
 	)
 	return ctrl.Result{}, nil
+}
+
+// reconcilePod makes the pod of the machine when it does not exist. It returns
+// the pod when the pod runs and the node agent in it answers, and nil while
+// the machine waits for that.
+//
+// The same rule serves the first pod and every later one. A pod that is gone,
+// for any reason, is made again with the same name, claims, address and
+// hardware address, so the node comes back with its state.
+//
+// While a later pod starts, status.addresses, the provider ID and the
+// provisioned flag stay as they are. The NVKE controller already knows the
+// node by them, and it reads a removed address or provider ID as a lost
+// machine, not as a node that restarts. Only the Ready condition says that
+// the node is not there yet.
+func (r *MachineReconciler) reconcilePod(
+	ctx context.Context,
+	machine *infrav1.PodVMMachine,
+	ownerMachine *clusterv1.Machine,
+	infraCluster *infrav1.PodVMCluster,
+	logger *slog.Logger,
+) (*corev1.Pod, ctrl.Result, error) {
+	pod, err := r.ownedPod(ctx, machine)
+	if err != nil {
+		return r.reportProblem(ctx, machine, err, logger)
+	}
+
+	switch {
+	case pod == nil:
+		if err := r.createPodResources(ctx, machine, ownerMachine, infraCluster, logger); err != nil {
+			return r.reportProblem(ctx, machine, err, logger)
+		}
+		return nil, ctrl.Result{}, r.setNotReady(ctx, machine, infrav1.WaitingForPodReason,
+			fmt.Sprintf("Pod %s/%s is made and does not run yet", machine.Status.PodNamespace, machine.Status.PodName))
+
+	case pod.Status.Phase != corev1.PodRunning:
+		return nil, ctrl.Result{}, r.setNotReady(ctx, machine, infrav1.WaitingForPodReason,
+			fmt.Sprintf("Pod %s/%s does not run yet", pod.Namespace, pod.Name))
+
+	case !nodeAgentAnswers(pod):
+		// The virtual machine boots, or the node agent waits for its
+		// identity. The event of the pod status starts the next reconcile.
+		return nil, ctrl.Result{}, r.setNotReady(ctx, machine, infrav1.WaitingForNodeAgentReason,
+			fmt.Sprintf("Pod %s/%s runs, the node agent in it does not answer yet", pod.Namespace, pod.Name))
+	}
+
+	return pod, ctrl.Result{}, nil
+}
+
+// reconcileRunningPod reports a machine whose node agent answers: it writes
+// status.addresses, then the provider ID, then the provisioned flag.
+//
+// The NVKE controller waits for an address, stores it one time, and calls the
+// node agent at that address a moment later. A failed call costs it a retry
+// wait that starts at 30 seconds and grows to 2 minutes. So the address is
+// reported here, when the agent answers, and not at the allocation. It is
+// written before the provider ID, so no reader ever sees a machine that has a
+// provider ID and no address.
+//
+// A reconcile of a machine in a steady state writes nothing.
+func (r *MachineReconciler) reconcileRunningPod(
+	ctx context.Context,
+	machine *infrav1.PodVMMachine,
+	pod *corev1.Pod,
+	logger *slog.Logger,
+) (ctrl.Result, error) {
+	if len(machine.Status.Addresses) == 0 {
+		before := machine.DeepCopy()
+		machine.Status.Addresses = []clusterv1.MachineAddress{
+			{Type: clusterv1.MachineInternalIP, Address: machine.Status.Address},
+		}
+		if err := r.patchStatus(ctx, machine, before); err != nil {
+			return ctrl.Result{}, err
+		}
+		logger.Info("Node agent answers, reported the address", "address", machine.Status.Address)
+	}
+
+	if machine.Spec.ProviderID == "" {
+		patch := client.MergeFromWithOptions(machine.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		machine.Spec.ProviderID = infrav1.FormatProviderID(pod.Namespace, pod.Name)
+		if err := r.client.Patch(ctx, machine, patch); err != nil {
+			if apierrors.IsConflict(err) {
+				logger.Info("Conflict while setting the provider ID, retrying")
+				return ctrl.Result{RequeueAfter: retryNow}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("failed to set the provider ID of PodVMMachine %s: %w", machine.Name, err)
+		}
+		logger.Info("Node agent answers, set the provider ID", "providerID", machine.Spec.ProviderID)
+	}
+
+	before := machine.DeepCopy()
+	machine.Status.Initialization.Provisioned = ptr.To(true)
+	running := fmt.Sprintf("Pod %s/%s runs and its node agent answers", pod.Namespace, pod.Name)
+	setCondition(machine, metav1.ConditionTrue, infrav1.PodRunningReason, running)
+	return ctrl.Result{}, r.patchStatus(ctx, machine, before)
+}
+
+// reportProblem turns a machineProblem into the Ready condition and a timed
+// requeue. Any other error goes back to the caller as a failed reconcile. It
+// has the result form of reconcilePod, which is its only caller.
+func (r *MachineReconciler) reportProblem(
+	ctx context.Context,
+	machine *infrav1.PodVMMachine,
+	err error,
+	logger *slog.Logger,
+) (*corev1.Pod, ctrl.Result, error) {
+	var problem *machineProblem
+	if !errors.As(err, &problem) {
+		return nil, ctrl.Result{}, err
+	}
+	logger.Warn("Machine cannot make progress", "reason", problem.reason, "message", problem.message)
+	return nil, ctrl.Result{RequeueAfter: retryAfter}, r.setNotReady(ctx, machine, problem.reason, problem.message)
 }
 
 // setNotReady reports why the machine is not ready. It never clears

@@ -41,11 +41,36 @@ const (
 	// data Secret yet.
 	WaitingForBootstrapDataReason = "WaitingForBootstrapData"
 
+	// BootstrapDataNotFoundReason means the bootstrap data Secret of the owner
+	// Machine does not exist or has no value, and the pod namespace holds no
+	// copy of it.
+	BootstrapDataNotFoundReason = "BootstrapDataNotFound"
+
 	// NoAddressAvailableReason means every address of the range of the
 	// cluster is in use.
 	NoAddressAvailableReason = "NoAddressAvailable"
 
+	// ResourceConflictReason means an object with the name that the provider
+	// needs exists in the pod namespace and belongs to something else. The
+	// provider does not change it and does not delete it.
+	ResourceConflictReason = "ResourceConflict"
+
+	// CreateRejectedReason means the API server of the host cluster rejected
+	// the pod, a volume claim or the copy of the bootstrap Secret, for example
+	// for a RuntimeClass that does not exist, a pod security rule of the pod
+	// namespace or a quota. The message carries the answer of the API server.
+	CreateRejectedReason = "CreateRejected"
+
 	// WaitingForPodReason means the pod exists and does not run yet, or the
 	// pod of a provisioned machine was lost and its new pod does not run yet.
 	WaitingForPodReason = "WaitingForPod"
+
+	// WaitingForNodeAgentReason means the pod runs and the node agent in it
+	// does not answer yet. The startup probe of the pod decides: the machine
+	// is not ready before the agent accepts a connection.
+	WaitingForNodeAgentReason = "WaitingForNodeAgent"
+
+	// PodRunningReason means the pod of the machine runs and the node agent in
+	// it answers.
+	PodRunningReason = "PodRunning"
 )
