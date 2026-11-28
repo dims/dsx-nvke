@@ -188,7 +188,10 @@ something on the machine already listens on 8080.
 
 `kubectl --context kind-podvm -n podvm-clusters get pods` shows one pod for each
 control plane node. `nvkectl get clusters` shows the cluster as `Provisioned`
-when the nodes have joined.
+when the first control plane node is up. The other nodes join after that.
+`nvkectl get kubeconfig podvm-example --output-file <file>` writes the
+kubeconfig of the cluster, and `kubectl --kubeconfig <file> get nodes` shows
+each node when it has joined.
 
 ## Clean up
 
