@@ -1,0 +1,31 @@
+#!/bin/bash
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# format-if-empty <device> <label>: make ext4 on a volume device that has no
+# filesystem. A wrong "empty" erases /var or the etcd data of a node, so two
+# checks must agree before a format.
+#
+# blkid ends with 0 for a device with a signature and with 2 for a device with
+# none. It also ends with 2 when a read of the device fails. So after a 2 this
+# script reads the place of the ext4 superblock magic itself. A read that
+# fails, or a magic that is there, stops the start.
+set -o errexit -o nounset -o pipefail
+
+dev=$1
+label=$2
+fail() {
+  echo "format-if-empty: $dev is not formatted: $*" >&2
+  exit 1
+}
+
+status=0
+blkid -p "$dev" >/dev/null || status=$?
+case "$status" in
+0) exit 0 ;;
+2) ;;
+*) fail "blkid ended with exit code $status" ;;
+esac
+magic=$(dd if="$dev" bs=1 skip=1080 count=2 status=none | od -An -tx1 | tr -d ' \n') || fail "the device cannot be read"
+[ "$magic" != 53ef ] || fail "blkid found no filesystem, but the device has an ext4 superblock"
+mkfs.ext4 -q -L "$label" "$dev"
