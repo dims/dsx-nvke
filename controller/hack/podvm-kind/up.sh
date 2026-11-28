@@ -17,6 +17,7 @@
 #   nodes      in each kind node: D-Bus, loop device nodes, the bridge of the
 #              node network, the CNI plugins bridge and static
 #   multus     Multus, and the pod namespace with its network attachment
+#   kata       Kata Containers with the runtime class kata-podvm
 #
 # Not in the default run:
 #   env        print the settings that deploy-stack.sh needs for this cluster
@@ -31,8 +32,11 @@ REPO="$(cd "${HERE}/../../.." && pwd)"
 
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-podvm}"
 STATE_DIR="${PODVM_KIND_STATE_DIR:-${XDG_STATE_HOME:-${HOME}/.local/state}/podvm-kind}"
+# The directory with vmlinux and kata-containers.img, which README.md builds.
+KATA_GUEST_DIR="${KATA_GUEST_DIR:-${STATE_DIR}/kata-guest}"
 POD_NAMESPACE="${POD_NAMESPACE:-podvm-clusters}"
 
+KATA_VERSION="${KATA_VERSION:-4.4.0}"
 MULTUS_VERSION="${MULTUS_VERSION:-v4.3.2}"
 CNI_PLUGINS_VERSION="${CNI_PLUGINS_VERSION:-v1.10.0}"
 
@@ -143,6 +147,24 @@ step_multus() {
     "${REPO}/cluster-api-provider-podvm/config/samples/networkattachmentdefinition.yaml" | k apply -f -
 }
 
+step_kata() {
+  local node file
+  for file in vmlinux kata-containers.img; do
+    [[ -s "${KATA_GUEST_DIR}/${file}" ]] || die "no ${KATA_GUEST_DIR}/${file}: README.md says how to build it"
+  done
+  for node in $(nodes); do
+    log "${node}: the guest kernel and the guest image"
+    docker exec "${node}" mkdir -p /opt/kata-podvm
+    for file in vmlinux kata-containers.img; do
+      docker cp -q "${KATA_GUEST_DIR}/${file}" "${node}:/opt/kata-podvm/${file}"
+    done
+  done
+  log "Kata Containers ${KATA_VERSION}"
+  helm --kube-context "kind-${KIND_CLUSTER_NAME}" upgrade --install kata-deploy \
+    oci://ghcr.io/kata-containers/kata-deploy-charts/kata-deploy --version "${KATA_VERSION}" \
+    --namespace kube-system --values "${HERE}/kata-deploy-values.yaml" --wait --timeout 15m
+}
+
 # The address of the control plane node of the host cluster on the node
 # network. A node of a tenant cluster reaches the SPIRE server there.
 step_env() {
@@ -161,11 +183,11 @@ EOF
 }
 
 if [[ $# -eq 0 ]]; then
-  set -- host network cluster nodes multus
+  set -- host network cluster nodes multus kata
 fi
 for step in "$@"; do
   case "${step}" in
-    host | network | cluster | nodes | multus | env) "step_${step}" ;;
+    host | network | cluster | nodes | multus | kata | env) "step_${step}" ;;
     *) die "unknown step ${step}: see the header of $0" ;;
   esac
 done
