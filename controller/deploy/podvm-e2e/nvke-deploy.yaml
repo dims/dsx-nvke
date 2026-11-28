@@ -1,12 +1,22 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Deploy path for the CAPNICo end-to-end lane. Hand-authored: there is no
+# Deploy path for a host cluster that runs the control plane nodes of a tenant
+# cluster as Kata pods, through cluster-api-provider-podvm. It is the
+# capnico-e2e path with another controller overlay: the NICo simulator still
+# gives the workers. controller/hack/podvm-kind/README.md has the host cluster
+# and the run. Hand-authored: there is no
 # umbrella chart and no generator -- each component is its own helm release, and
 # the item order below IS the install order, which is what
 # docs/site-bootstrap/deploy-repository.md specifies.
 #
 # Absent deliberately:
+#   cluster-api-provider-podvm. It is installed from the checkout, with
+#                  kubectl apply -k cluster-api-provider-podvm/config/default,
+#                  before this runs. A manifest item holds committed YAML, and
+#                  for this provider that is a generated copy that goes stale.
+#   The host cluster parts that the provider needs: Kata, the node network, a
+#                  load balancer and block storage. A site brings its own.
 #   cert-manager   clusterctl init installs it before this runs, so a second
 #                  owner would fail on CRDs it cannot adopt.
 #   the CAPD items this lane has no use for -- the reboot test double and the controller's
