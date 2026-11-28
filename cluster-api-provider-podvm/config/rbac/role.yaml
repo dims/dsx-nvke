@@ -20,6 +20,34 @@ rules:
   - list
   - watch
 - apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cluster.x-k8s.io
+  resources:
+  - clusters
+  - machines
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - infrastructure.cluster.x-k8s.io
   resources:
   - podvmclusters
@@ -31,5 +59,15 @@ rules:
   - infrastructure.cluster.x-k8s.io
   resources:
   - podvmclusters/status
+  - podvmmachines/status
   verbs:
   - patch
+- apiGroups:
+  - infrastructure.cluster.x-k8s.io
+  resources:
+  - podvmmachines
+  verbs:
+  - get
+  - list
+  - patch
+  - watch
