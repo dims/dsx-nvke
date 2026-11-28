@@ -19,8 +19,9 @@ same set on one Linux machine, in a kind cluster, so that the
 
 ## What the machine needs
 
-- Linux on amd64 with `/dev/kvm`. In a virtual machine, nested virtualization
-  must be on.
+- Linux on amd64 or arm64 with `/dev/kvm`. In a virtual machine, nested
+  virtualization must be on. This page is tested on amd64. On arm64 the first
+  run is in work.
 - Docker 28 or newer with `buildx`, `kind`, `kubectl`, `helm` and `clusterctl`.
 - Go, a C compiler and `make`, for the builds. The node image README lists what
   its kernel build needs more.
