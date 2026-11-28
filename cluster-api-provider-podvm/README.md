@@ -19,6 +19,7 @@ the volumes and the address on demand, and it deletes them with the machine.
 | `config/` | CRDs, RBAC, and the controller Deployment |
 | `config/samples/` | Sample objects and a sample cluster request, with example values |
 | `Dockerfile` | The standalone provider image |
+| `node-image/` | The node image that the pods run, and the guest kernel options that it needs |
 
 The provider imports nothing from the NVKE controller. It reads only the
 Kubernetes API, Cluster API, and its own types. It has its own Go module, binary,
@@ -189,7 +190,8 @@ no cache of them.
 
 ### The pod
 
-This is the contract with the node image. The image side is not in this module.
+This is the contract with the node image. The image side is in
+[node-image/](node-image/README.md).
 
 | Point | Value |
 |---|---|
@@ -371,7 +373,8 @@ limit of 5 seconds, because the controller reconciles one machine at a time.
   `spec.resources` and `spec.volumes` of a `PodVMMachine` cannot change. A
   `PodVMMachineTemplate` can change, and the change reaches only machines that
   are made after it.
-- It does not build the node image. The image must meet the pod contract above.
+- It does not build the node image. The image must meet the pod contract above,
+  as the image of `node-image/` does.
 
 ## Use with the NVKE controller
 
