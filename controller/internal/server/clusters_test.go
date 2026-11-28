@@ -593,6 +593,82 @@ func TestClusterService_CreateClusterRejectsControlPlaneVIPOverlap(t *testing.T)
 	mockDB.AssertNotCalled(t, "RunInTx", mock.Anything, mock.Anything)
 }
 
+// A request for three control-plane nodes with controlPlaneEndpoint and no VIP
+// must fail before the transaction when the value is wrong. When the value is
+// right, the row gets it and the response returns it.
+func TestClusterService_CreateClusterControlPlaneEndpoint(t *testing.T) {
+	siteID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440001")
+	clusterID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
+
+	tests := []struct {
+		name     string
+		endpoint string
+		// wantMessage lists the parts of the 400 message. Empty means 201.
+		wantMessage []string
+	}{
+		{name: "an IPv4 endpoint outside the cluster CIDRs", endpoint: "172.31.1.20:6443"},
+		{
+			name:        "an IPv4 endpoint inside the service CIDR",
+			endpoint:    "10.96.0.10",
+			wantMessage: []string{"controlPlaneEndpoint", "network.serviceCIDR"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockDB := &mockDB{MockTx: &mockTx{}}
+			if len(tt.wantMessage) == 0 {
+				mockDB.On("RunInTx", mock.Anything, mock.Anything).Return(nil)
+				mockDB.MockTx.On("CreateCluster", mock.Anything, mock.MatchedBy(func(c *db.Cluster) bool {
+					return c.ControlPlaneEndpoint == tt.endpoint &&
+						c.ControlPlaneVIP == "" &&
+						c.ControlPlaneConfig.DesiredCount == 3
+				})).Return(forgeDBCluster(db.Cluster{
+					ID:                   clusterID,
+					Name:                 "test-cluster",
+					PodCIDR:              "192.168.0.0/16",
+					ServiceCIDR:          "10.96.0.0/12",
+					Nico:                 &db.NicoClusterProvider{OrgID: testOrgID, SiteID: siteID},
+					ControlPlaneEndpoint: tt.endpoint,
+				}), nil)
+				mockDB.MockTx.On("CreateWorkflowOutboxEntry", mock.Anything, "ProvisionCluster", mock.Anything, mock.Anything).
+					Return(db.WorkflowOutbox{}, nil)
+				expectControlPlaneConfigCreate(mockDB.MockTx, clusterID)
+			}
+
+			service := newTestClusterService(discardLogger(), mockDB)
+			resp, err := service.CreateCluster(context.Background(), api.CreateClusterRequestObject{
+				Body: &api.CreateClusterRequest{
+					Name:                          "test-cluster",
+					Nico:                          nicoClusterProvider(siteID, uuid.New()),
+					CniPlugin:                     "ovn-kubernetes",
+					ControlPlaneKubernetesVersion: "1.29.0",
+					ControlPlaneConfig:            nicoCreateControlPlaneConfig(3, false),
+					ControlPlaneEndpoint:          tt.endpoint,
+				},
+			})
+			require.NoError(t, err)
+
+			if len(tt.wantMessage) > 0 {
+				badRequest, ok := resp.(api.CreateCluster400JSONResponse)
+				require.True(t, ok, "expected CreateCluster400JSONResponse, got %T", resp)
+				for _, part := range tt.wantMessage {
+					assert.Contains(t, badRequest.Message, part)
+				}
+				mockDB.AssertNotCalled(t, "RunInTx", mock.Anything, mock.Anything)
+				return
+			}
+
+			created, ok := resp.(api.CreateCluster201JSONResponse)
+			require.True(t, ok, "expected CreateCluster201JSONResponse, got %T", resp)
+			require.NotNil(t, created.ControlPlaneEndpoint)
+			assert.Equal(t, tt.endpoint, *created.ControlPlaneEndpoint)
+			assert.Nil(t, created.ControlPlaneVIP)
+			mockDB.MockTx.AssertExpectations(t)
+		})
+	}
+}
+
 func TestClusterService_CreateClusterRejectsCustomNetworkForCalico(t *testing.T) {
 	mockDB := &mockDB{MockTx: &mockTx{}}
 	service := newTestClusterService(discardLogger(), mockDB)
