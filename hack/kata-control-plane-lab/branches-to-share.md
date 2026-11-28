@@ -1,6 +1,6 @@
 # Branches to share: NVKE control plane nodes as Kata pods
 
-Last update: 2026-11-28, 08:55 local time. Each tip in the state table was the tip of its branch on the fork at that time (fetched at 08:55).
+Last update: 2026-11-28, 10:09 local time. Each tip in the state table was the tip of its branch on the fork at that time (fetched at 10:09).
 
 This page lists the only branches that the larger team needs. Each of the eleven is meant to become one pull request. No pull request is open yet. One more branch, `integration/control-plane-kata-pods`, holds the commits of the ten NVKE branches together, for a person who wants to try the feature. It is not for a pull request. Every other branch on the two forks is lab material and is not for sharing.
 
@@ -21,11 +21,11 @@ This page lists the only branches that the larger team needs. Each of the eleven
 | 8 | `feat/cluster-api-provider-podvm` | `08379976` | 22 | 10,943 added, 9 removed | The points of the fresh review are in since 2026-11-28, 08:28. Six commits are newer than the lab run: the provider makes the Service of the control plane endpoint, the controller chart grants the rights, samples, and docs. They have not run in a cluster |
 | 9 | `feat/podvm-node-image` | `27806a56` | 3, on top of branch 8 | 1,253 added, 2 removed | The points of the fresh review are in since 2026-11-28: a volume is formatted only when two checks agree that it is empty, a file mode is read as cloud-init reads it, and the README has no lab number and has the full kernel build command. The image builds. It has not run in a pod yet, and that run is the open point |
 | 10 | `fix/agent-kill-child-cgroups` (Kata) | `e0f5597` | 1 | 161 added, 6 removed | Ready |
-| 11 | `feat/podvm-deploy-path` | `c39d6323` | 12, on top of branch 9 | 1,867 added, 2 removed | New on 2026-11-28. Nothing of it ran on a cluster yet: every check so far is a static check. The first run from an empty machine is the open point |
+| 11 | `feat/podvm-deploy-path` | `1988a40d` | 15, on top of branch 9 | 1,879 added, 2 removed | In its first run on a cluster since 2026-11-28. Steps 1 to 9 of the guide passed, step 7 after one fix of this branch. The run goes on with the provider, the simulator, the management plane and the first cluster |
 
 "Ready" means that the commits are final in content. After the rework, all branches are built together again and the lab tests run again. This page gets the result.
 
-State on 2026-11-28: each branch has the points of its fresh review. No agent rewrites a branch now. Still open for all: the first run of the final forms on a cluster, from an empty machine, with the deploy path of branch 11.
+State on 2026-11-28: each branch has the points of its fresh review. The first run of the guide `try-it.md` is in work since 2026-11-28 on the second lab machine, from the two public integration branches. Steps 1 to 9 of its 13 set up steps passed (the builds of the guest kernel, the guest image and the images, the kind host cluster with Kata, MetalLB and block storage, a Kata check pod, the image load). The run found one fault of the product so far, in branch 11, and its fix is on the fork. Branches 2, 8 and 9 get their first run in a cluster with the first cluster request, which comes next. The run report is in the private notes of the lab.
 
 Before a pull request, each branch still needs these things. They are rules of the repository (`CONTRIBUTING.md`, `docs/pull-request-triage.md`):
 
@@ -50,12 +50,12 @@ Before a pull request, each branch still needs these things. They are rules of t
 
 https://github.com/dims/dsx-nvke/tree/integration/control-plane-kata-pods
 
-- What it is: the commits of branches 1 to 7 and of branch 11 (which brings branches 8 and 9), picked in the order above onto the main commit `d625fcfa`. It has no code of its own. Tip `9b82daf4`, 54 commits.
+- What it is: the commits of branches 1 to 7 and of branch 11 (which brings branches 8 and 9), picked in the order above onto the main commit `d625fcfa`. It has no code of its own. Tip `f36aeee8`, 57 commits.
 - What it is for: one tree to build the agent, the controller, the simulator, the provider and the node image from, with the deploy path and the kind host cluster scripts, for a person who wants to try the feature. It is not for a pull request and not for review.
 - One place differs from the branches: branch 1 and branch 6 each add a field at the end of the same struct in `agent/internal/agent/agent.go`. The integration branch has both fields. The README of the simulator has the lines of branch 3 and of branch 11, and the docs page on infrastructure providers has the lines of branch 7 and of branch 11. Each other file that a branch changes is the same as in that branch.
 - It is built again after each change of a branch, so its history is rewritten. Do not base work on it.
 - The guide for a first run is `try-it.md`, next to this page. It is written for a person outside the team who has only the two public forks. Nothing of it ran from start to end yet, and each step has a mark for what ran.
-- Check at 08:54 on 2026-11-28: `make build` passes for all modules. The tests of the agent module and of the provider module pass. The CLI test decodes both example requests of branch 11. The deploy list check and the docs check pass.
+- Check at 10:07 on 2026-11-28: `make build` passes for all modules, the CLI test decodes both example requests of branch 11, and the deploy list check and the docs check pass. The first run of the guide cloned this branch on a test machine with no credentials and built each part from it.
 - Kata Containers has its own integration branch, because the guest needs two changes of the Kata agent: https://github.com/dims/kata-containers/tree/integration/control-plane-kata-pods (tip `96a8d905b`). It is Kata 4.4.0 plus the commit of branch 10 and a backport of the upstream pull request 13627 of another author (still open on 2026-11-28, as is the upstream issue 14062 for the fault of branch 10), which lets an exec work after systemd starts in the container.
 
 ## What each branch does
@@ -262,6 +262,13 @@ The branch adds what a person needs, beyond the provider and its node image, to 
 - `d4191076` docs(cli): add an example node pool of nico-mock workers for a pod VM cluster (48 lines)
 - `c39d6323` docs(cli): add an example cluster with control plane nodes as pods (109 lines)
   - `cli/examples/podvm-cluster.yaml`. It uses the request field of branch 5. So the test that decodes the examples fails for this file on this branch alone and passes with branch 5 below it, as in the integration branch. The pull request of this branch comes after branch 5.
-- Proof so far, static checks only: the repository checks pass at the tip (deploy lists, license headers, names, internal config, docs, shell lint, workflows), the controller chart renders with the settings of the path and differs from the render of `capnico-e2e` only in the four intended points, the deploy executor walks the ten items of the path in a dry run, and the Kata chart of 4.4.0 renders the custom runtime. The charts of MetalLB and of the storage provisioner were not rendered.
-- Open: nothing of it ran on a cluster. These things run for the first time in the first run: the guest image build from the make target of Kata, the custom runtime of the Kata chart, MetalLB on the bridge, the provisioner on loop devices, the simulator as a process on the machine, `deploy-stack.sh` outside its test runner, the Service that the provider makes, a worker with one network, a new node that pulls its own images, and `nvkectl`.
+- `5c01417c` docs(hack): say where the tool versions for the kind host cluster are pinned (3 lines)
+  - The README points at `make/tool-versions.mk` and `go.work`. Found by the first run.
+- `bbad1365` fix(hack): name the Cloud Hypervisor shim as the default shim of the Kata install (5 lines)
+  - The values file for the Kata chart turned each shim off but the Cloud Hypervisor one and left the default shim of the chart, which is a QEMU shim. The installer of Kata refuses that, so the step `kata` of `up.sh` failed in the first run. The check is in the installer and not in the chart, so the static render could not show it.
+- `1988a40d` docs(hack): let the reader choose the local port of the API port forward (6 added, 2 removed)
+  - A variable `API_PORT` in the README, because something on the test machine already listened on 8080.
+- Proof by static checks: the repository checks pass at the tip `1988a40d` (deploy lists, license headers, names, internal config, docs, shell lint, workflows), the controller chart renders with the settings of the path and differs from the render of `capnico-e2e` only in the four intended points, the deploy executor walks the ten items of the path in a dry run, and the Kata chart of 4.4.0 renders the custom runtime. The charts of MetalLB and of the storage provisioner were not rendered.
+- Proof by the first run, 2026-11-28, still in work: steps 1 to 9 of the guide passed on one test machine, from a clone of the public integration branch with no credentials. That covers the README of this branch up to the image load, and `up.sh` with each of its eight steps. These ran for the first time and passed: the guest image build from the make target of Kata, a pod on that guest image and on the guest kernel of branch 9, the custom runtime of the Kata chart, the storage provisioner on loop devices, and `up.sh` as a whole (in two parts, with the fix above between them. One clean pass of the whole script comes at the end of the run).
+- Open, in the same run: MetalLB on the bridge of the node network, the simulator as a process on the machine, `deploy-stack.sh` outside its test runner, the Service that the provider makes, a worker with one network, a new node that pulls its own images, and `nvkectl`.
 - Open, for the product: with OIDC on, the provider needs the SPIFFE program and socket in its pod to reach a cluster, as the Cluster API controllers get them from `controller/deploy/k8s/capi-spiffe-exec-auth`. The path turns OIDC off, as the lab did. The provider is not an item of the path: it installs with `kubectl apply -k` before it, because no image of the provider is published. No CI lane uses the path yet.

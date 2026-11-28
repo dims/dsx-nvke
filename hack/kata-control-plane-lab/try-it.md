@@ -2,10 +2,10 @@
 
 State of 2026-11-28. The guide uses two public branches:
 
-- `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `9b82daf4`
+- `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `f36aeee8`
 - `integration/control-plane-kata-pods` of `https://github.com/dims/kata-containers`, at `96a8d905b`
 
-**Nothing of this path ran from start to end yet.** Each part ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
+**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Steps 1 to 9 of Part 1 passed in it, step 7 after one fix of the branch. Each other part ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
 
 ## What the feature is
 
@@ -170,7 +170,7 @@ kh delete pod kata-check
 
 ### 9. Load the images into the kind nodes
 
-**Ran.**
+**Ran in the first run of 2026-11-28.** The load took 2 min 22 s.
 
 Run the loop of the README, section "3. Bring the host cluster up".
 
