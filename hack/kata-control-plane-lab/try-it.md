@@ -2,10 +2,10 @@
 
 State of 2026-11-28. The guide uses two public branches:
 
-- `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `f36aeee8`
+- `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `e6ff4e4b`
 - `integration/control-plane-kata-pods` of `https://github.com/dims/kata-containers`, at `96a8d905b`
 
-**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Steps 1 to 9 of Part 1 passed in it, step 7 after one fix of the branch. Each other part ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
+**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Each other part ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
 
 ## What the feature is
 
@@ -117,7 +117,7 @@ Run the commands of the README, section "2. Build the images and nvkectl", from 
 
 ### 7. Bring the host cluster up
 
-**Ran in the first run of 2026-11-28, after one fix of the branch.** The first try stopped at the step `kata`, and the fix is in the branch since the tip `f36aeee8`. With it each check below passed. The script took about 4 minutes.
+**Ran in the first run of 2026-11-28, in two parts.** The first try stopped at the step `kata`, and the fix is in the public branch. With it each check below passed. A run of the script in one go is planned for the end of the first run. The script took about 4 minutes.
 
 ```bash
 $NVKE/controller/hack/podvm-kind/up.sh
@@ -132,7 +132,7 @@ The script runs eight steps. Each can run again alone, for example `up.sh kata`.
 | `cluster` | The kind cluster `podvm` with one control plane node and three workers | Ran in the first run |
 | `nodes` | In each kind node: D-Bus, loop device nodes, the bridge `br-nodenet`, two CNI plugins | Ran in the first run |
 | `multus` | Multus, the namespace `podvm-clusters` and its network attachment | Ran in the first run |
-| `kata` | Kata Containers 4.4.0 with the runtime class `kata-podvm` | Ran in the first run, after the fix |
+| `kata` | Kata Containers 4.4.0 with the runtime class `kata-podvm` | Ran in the first run, at the second try |
 | `metallb` | MetalLB with a pool on the node network | Ran in the first run. If it answers on the node network shows in scenario 1 |
 | `storage` | Loop devices and the local static provisioner in block mode | Ran in the first run |
 
@@ -171,7 +171,7 @@ Run the loop of the README, section "3. Bring the host cluster up".
 
 ### 10. Install Cluster API and the provider
 
-**Lab** for Cluster API. **New** for the provider install from the source tree.
+**Ran in the first run of 2026-11-28.** It took 18 s.
 
 Run the commands of the README, section "4. Install Cluster API and the provider", from `$NVKE`.
 
@@ -179,7 +179,7 @@ Run the commands of the README, section "4. Install Cluster API and the provider
 
 ### 11. Install CAPNICo and start the simulator
 
-**New.** The lab installed a released CAPNICo image and ran the simulator in a container.
+**Ran in the first run of 2026-11-28, after one fix of the branch.** It took 1 min 43 s. The README of the tip `f36aeee8` calls `install-capnico.sh` by its path, and the script has no execute bit. Put `bash` in front of it until a later tip has the fix.
 
 Run the commands of the README, section "5. Install CAPNICo and start the simulator", from `$NVKE`. They get the CAPNICo source as a Go module, build CAPNICo from it and start the simulator.
 
@@ -189,7 +189,13 @@ Run the commands of the README, section "5. Install CAPNICo and start the simula
 
 ### 12. Install the management plane
 
-**New.** The lab had its own install script.
+**Ran in the first run of 2026-11-28, after one fix of the branch.** It takes about 2 minutes. The README of the tip `f36aeee8` has no step for the image of the profiles, and the controller pod then waits in `Init:ImagePullBackOff`. Until a later tip has the fix, run this from `$NVKE` before the step, and load the image as in step 9:
+
+```bash
+docker build --tag docker.local/cwe-profiles:tilt controller/test/fixtures
+for n in $(kind get nodes --name podvm); do
+  docker save --platform linux/amd64 docker.local/cwe-profiles:tilt | docker exec -i "$n" ctr -n k8s.io images import --digests -; done
+```
 
 Run the commands of the README, section "6. Install the management plane", from `$NVKE`.
 
@@ -199,18 +205,18 @@ kh -n nvke-controller get pods
 kh get clusterrole nvke-controller-podvm
 ```
 
-- **See.** Five releases with the status `deployed`: `postgresql`, `spire-crds`, `temporal`, `spire` and `nvke-controller`. A controller pod that runs. The ClusterRole.
+- **See.** The five releases of this step with the status `deployed`: `postgresql`, `spire-crds`, `temporal`, `spire` and `nvke-controller`. The list also has the four releases of the steps before. A controller pod that runs. The ClusterRole.
 - **If not.** The script prints the item that failed. `kh get pods --all-namespaces | grep -v -E 'Running|Completed'` shows what does not start.
 
 ### 13. Point nvkectl at the API
 
-**New.** The lab called the API with `curl` and never ran `nvkectl`.
+**Ran in the first run of 2026-11-28.**
 
-Run the first three commands of the README, section "7. Create a cluster". Stop before `nvkectl create cluster`.
+Run the commands of the README, section "7. Create a cluster", up to `nvkectl config set-site`. Stop before `nvkectl create cluster`. The first line sets `API_PORT`, the local port of the port forward. Take another free port there when something on the machine listens on 8080.
 
 ```bash
 nvkectl get clusters
-export API=http://localhost:8080
+export API=http://localhost:${API_PORT}
 TOKEN=$(kh -n nke-clients create token nke-client --audience https://nke.tilt.local)
 curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" "$API/api/clusters"
 ```
