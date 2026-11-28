@@ -33,7 +33,7 @@ State of 2026-11-28. A first run is in work, on one arm64 machine with `/dev/kvm
 - The hypervisor differs. Kata Containers 4.4.0 has Cloud Hypervisor with its Rust runtime for amd64 only. On arm64 `up.sh` puts the runtime class `kata-podvm` on QEMU with the same Rust runtime. The guest kernel, the guest image and the name of the runtime class are the same.
 - On arm64 `up.sh` also gives each kind node a larger `/dev/shm`. QEMU keeps the memory of a guest there, and a container has 64 MB of it.
 - Each mark, each time and each number of this guide is from amd64.
-- Steps that passed on arm64: 1 to 8, each as it is written here, on 2026-11-28. The guest kernel of step 3 has the same file name there. Step 4 took 11 minutes, and the base image of step 5 has 1.1 GB. The pod of step 8 runs on QEMU and prints the same kernel version.
+- Steps that passed on arm64: 1 to 13, each as it is written here, on 2026-11-28. The guest kernel of step 3 has the same file name there. Step 4 took 11 minutes, and the base image of step 5 has 1.1 GB. The pod of step 8 runs on QEMU and prints the same kernel version. No scenario ran there yet.
 
 ## The marks
 
