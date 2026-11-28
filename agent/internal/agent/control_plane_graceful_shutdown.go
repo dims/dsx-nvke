@@ -225,12 +225,24 @@ func (s *NodeAgentServer) runK8sControlPlaneNodeGracefulShutdown(
 // can put back exactly that rather than working it out again afterwards. The
 // withdrawal destroys the evidence: it parks the manifest and deletes the
 // address from lo, which are two of the three things the address resolves from.
+//
+// A node behind a load balancer that it does not run leaves it through the
+// control plane endpoint gate, when one is configured. The gate does not depend
+// on kube-vip, and it goes first: closing it disturbs nothing until its settle
+// time has passed, and a gate that fails stops the withdrawal with kube-vip
+// untouched. The gate file records the withdrawal, so it is not reported here.
 func (s *NodeAgentServer) withdrawKubeVipLocked(
 	ctx context.Context,
 	runner nvkeutils.CommandRunner,
 	progress nodeAgentOperationProgress,
 	parkDir string,
 ) (kubeVipWithdrawal, error) {
+	if s.ControlPlaneEndpointGate.File != "" {
+		if err := s.withdrawThroughControlPlaneEndpointGate(ctx, runner, progress, parkDir); err != nil {
+			return kubeVipWithdrawal{}, err
+		}
+	}
+
 	progress.SetStep(stepResolvingKubeVip)
 	vip, fromManifest, err := s.resolveKubeVipAddressFromManifest(parkDir)
 	if err != nil {
@@ -331,7 +343,7 @@ func (s *NodeAgentServer) withdrawKubeVip(
 // has to be back by other means before this is called. When kube-vip is not
 // configured on this node (mirroring the withdrawal-side skip in
 // runK8sControlPlaneNodeGracefulShutdown), there is nothing to restore and this
-// is a no-op.
+// only opens the control plane endpoint gate, when one is closed.
 //
 // That precondition used to be documented and trusted. It is now verified: the
 // apiserver readiness wait below is the same /readyz kube-vip itself polls, so
@@ -391,7 +403,12 @@ func (s *NodeAgentServer) restoreKubeVipLocked(
 	progress nodeAgentOperationProgress,
 	parkDir string,
 	withdrawn kubeVipWithdrawal,
-) error {
+) (err error) {
+	// The control plane endpoint gate opens after kube-vip is back, and also
+	// when kube-vip does not come back: a gate left closed over a kube-vip
+	// problem is one more thing a human has to undo.
+	defer func() { err = errors.Join(err, s.openControlPlaneEndpointGate(progress, parkDir)) }()
+
 	vip := withdrawn.vip
 	restoreManifest := withdrawn.manifestParked
 	if vip == "" {
