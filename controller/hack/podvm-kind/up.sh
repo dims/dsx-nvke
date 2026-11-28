@@ -117,6 +117,13 @@ if [ -n "\$addr" ]; then
   ip addr replace "\$addr" dev ${NODE_BRIDGE}
 fi
 EOF
+  # Under QEMU the memory of each Kata guest is a file in /dev/shm, and Docker
+  # gives a container 64M there. A Linux machine gives /dev/shm half of its
+  # memory, as a limit and not as a reservation. Only arm64 runs QEMU here,
+  # so a kind node on amd64 stays as it was.
+  if [[ "$(go_arch)" == arm64 ]]; then
+    echo 'mount -o remount,size=50% /dev/shm'
+  fi
 }
 
 step_nodes() {
