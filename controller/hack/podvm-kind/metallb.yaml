@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The addresses that MetalLB gives to the control plane Service of a tenant
+# cluster, on the node network of up.sh (172.28.0.0/16). Docker gives out
+# 172.28.0.0/24 and the provider takes 172.28.1.0/24, so this range is free.
+#
+# The addresses are announced on the bridge of the node network alone. A
+# control plane pod and a worker of the simulator reach them there.
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: podvm-control-plane
+  namespace: metallb-system
+spec:
+  addresses:
+    - 172.28.255.200-172.28.255.250
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: podvm-control-plane
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - podvm-control-plane
+  interfaces:
+    - br-nodenet
