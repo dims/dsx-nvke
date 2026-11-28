@@ -10,6 +10,10 @@ package v1alpha1
 // The pod namespace is not the namespace of the PodVMMachine, so an owner
 // reference cannot link the two. These labels are that link. The provider
 // changes and deletes an object only when the labels name its PodVMMachine.
+//
+// The Service of the control plane endpoint belongs to a PodVMCluster. It
+// carries the owner labels with the namespace, the name and the UID of that
+// PodVMCluster.
 const (
 	// MachineNameLabel holds the name of the Cluster API Machine. It is also
 	// the name of the pod.

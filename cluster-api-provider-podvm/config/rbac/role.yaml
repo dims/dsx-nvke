@@ -32,6 +32,7 @@ rules:
   - ""
   resources:
   - pods
+  - services
   verbs:
   - create
   - delete
@@ -51,9 +52,11 @@ rules:
   - infrastructure.cluster.x-k8s.io
   resources:
   - podvmclusters
+  - podvmmachines
   verbs:
   - get
   - list
+  - patch
   - watch
 - apiGroups:
   - infrastructure.cluster.x-k8s.io
@@ -62,12 +65,3 @@ rules:
   - podvmmachines/status
   verbs:
   - patch
-- apiGroups:
-  - infrastructure.cluster.x-k8s.io
-  resources:
-  - podvmmachines
-  verbs:
-  - get
-  - list
-  - patch
-  - watch

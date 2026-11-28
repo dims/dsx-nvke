@@ -43,6 +43,9 @@ spec:
     cidr: 172.28.1.0/24             # the block that the provider gives out
     prefixLength: 16                # the prefix length of the node network
   failureDomainLabelKey: topology.kubernetes.io/zone
+  controlPlaneService:              # optional: the provider makes the Service
+    annotations:                    # of the control plane endpoint
+      lb.example.com/address: 192.0.2.10
 ```
 
 A `PodVMMachineTemplate`:
@@ -76,6 +79,8 @@ Cluster API machine controller waits for that field.
 3. The block does not overlap the block of an older PodVMCluster. The older
    cluster keeps its range, so a new cluster cannot take addresses from it.
 4. Publish status.failureDomains from the nodes of the host cluster.
+5. With spec.controlPlaneService: make the Service of the control plane
+   endpoint, and wait until the load balancer gave it an address.
 ```
 
 The provider does not use the first and the last address of the block, and it
@@ -88,8 +93,47 @@ label `kubernetes.io/hostname`. A node that is unschedulable, or that has a
 taint with the effect `NoSchedule` or `NoExecute`, is in no failure domain. Each
 domain has `controlPlane: true`.
 
-The cluster controller holds no finalizer. A delete of the `PodVMCluster` never
+A cluster with no control plane Service has no finalizer, and its delete never
 waits for the provider.
+
+### The control plane Service
+
+With `spec.controlPlaneService` the cluster controller makes the shared endpoint
+of the API servers: one Service of the type `LoadBalancer` in the pod namespace.
+
+| Point | Value |
+|---|---|
+| Name | `<cluster-name>-control-plane`, from the name of the owner Cluster |
+| Selector | `cluster.x-k8s.io/cluster-name: <cluster-name>` and `cluster.x-k8s.io/control-plane: ""`, the two labels of a control plane pod |
+| Port | 6443, to port 6443 of the pod |
+| From the spec | `annotations`, `loadBalancerClass` and `externalTrafficPolicy` |
+
+The NVKE controller takes the endpoint from its own cluster request, so the
+address of the Service must be known before the request. Ask the load balancer
+for a fixed address in `annotations`, and give the same address to the NVKE
+controller as `controlPlaneEndpoint`.
+
+The cluster is not provisioned before the Service has an address, because the
+first node of the cluster needs the endpoint. Until then the `Ready` condition
+is false with one of these reasons:
+
+| Reason | Meaning |
+|---|---|
+| `WaitingForOwnerCluster` | Cluster API has not set the owner reference yet. The Service selects the name of the owner Cluster |
+| `ControlPlaneServiceNameInvalid` | The name of the Cluster gives no valid Service name. It must start with a letter, have no dot, and have at most 49 characters |
+| `ControlPlaneServiceConflict` | A Service with that name exists and belongs to something else. The provider does not change it and does not delete it |
+| `WaitingForLoadBalancerAddress` | The Service exists, and the load balancer gave it no address yet |
+
+`spec.controlPlaneService` cannot be added, removed or changed after the
+`PodVMCluster` exists. The provider makes a Service that is gone again, and it
+does not change a Service that exists.
+
+A finalizer holds a `PodVMCluster` with a control plane Service until that
+Service is gone. The provider deletes only the Service that carries its owner
+labels with the UID of the cluster.
+
+With no `spec.controlPlaneService` the provider makes no Service, and the caller
+brings the endpoint.
 
 ## What the machine controller does
 
@@ -166,9 +210,10 @@ This is the contract with the node image. The image side is not in this module.
 
 The pod has no token of the host cluster and no service links.
 
-A Service of the caller can select the first two labels to get one shared
+The control plane Service selects the first two labels, so it is one shared
 endpoint for the API servers. Only a pod with a ready API server is behind it.
-The provider does not make that Service.
+The provider makes that Service when the `PodVMCluster` asks for it, see
+[The control plane Service](#the-control-plane-service).
 
 The readiness probe is the health check of that Service. It runs the program
 `podvm-endpoint-ready` in the guest, and the node image must have it. The
@@ -304,8 +349,9 @@ limit of 5 seconds, because the controller reconciles one machine at a time.
 
 - It does not make the pod namespace, the RuntimeClass, the network attachment
   or a storage class. They are inputs.
-- It does not make the shared endpoint Service of the control plane. The caller
-  makes it before the cluster request.
+- It does not choose the address of the control plane endpoint. The caller asks
+  the load balancer for a fixed address and gives the same address to the NVKE
+  controller.
 - It does not move a pod after the loss of a host node. A volume of a lost node
   may not attach on another node, and nothing fences the old virtual machine.
   An operator starts the replace.
@@ -344,7 +390,10 @@ The NVKE controller takes the two objects on its `infra` path:
     "cluster": {
       "apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha1",
       "kind": "PodVMCluster",
-      "spec": {"podNamespace": "...", "runtimeClassName": "...", "networkAttachment": {}, "addressRange": {}}
+      "spec": {
+        "podNamespace": "...", "runtimeClassName": "...", "networkAttachment": {}, "addressRange": {},
+        "controlPlaneService": {"annotations": {"lb.example.com/address": "<shared address>"}}
+      }
     }
   }
 }

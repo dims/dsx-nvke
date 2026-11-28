@@ -58,16 +58,17 @@ func main() {
 	utilruntime.Must(clusterv1.AddToScheme(scheme))
 	utilruntime.Must(infrav1.AddToScheme(scheme))
 
-	// The host cluster can hold many pods, and the provider needs only the
-	// ones it made. Every one of those carries the owner UID label.
-	ownedPods, err := labels.NewRequirement(infrav1.OwnerUIDLabel, selection.Exists, nil)
-	exitOnError(logger, err, "build the pod selector")
+	// The host cluster can hold many pods and Services, and the provider needs
+	// only the ones it made. Every one of those carries the owner UID label.
+	owned, err := labels.NewRequirement(infrav1.OwnerUIDLabel, selection.Exists, nil)
+	exitOnError(logger, err, "build the selector of the objects of the provider")
 
 	manager, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
 		Cache: cache.Options{
 			ByObject: map[client.Object]cache.ByObject{
-				&corev1.Pod{}: {Label: labels.NewSelector().Add(*ownedPods)},
+				&corev1.Pod{}:     {Label: labels.NewSelector().Add(*owned)},
+				&corev1.Service{}: {Label: labels.NewSelector().Add(*owned)},
 			},
 		},
 		Metrics:                metricsserver.Options{BindAddress: metricsAddress},
