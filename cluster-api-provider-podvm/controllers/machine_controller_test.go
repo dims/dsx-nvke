@@ -5,12 +5,14 @@ package controllers
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/utils/ptr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -18,6 +20,32 @@ import (
 
 	infrav1 "github.com/dsx-ai-factory/nvke/cluster-api-provider-podvm/api/v1alpha1"
 )
+
+func TestMachineReconcilerAddsFinalizerBeforeAnythingElse(t *testing.T) {
+	machine := newInfraMachine(testMachineName)
+	machine.Finalizers = nil
+	reconciler, k8sClient := newMachineReconcilerForTest(t, machineObjects(machine)...)
+
+	result := reconcileMachine(t, reconciler, testMachineName)
+	require.Equal(t, ctrl.Result{RequeueAfter: retryNow}, result)
+
+	machine = getInfraMachine(t, k8sClient, testMachineName)
+	require.Equal(t, []string{"podvm.infrastructure.cluster.x-k8s.io/machine-cleanup"}, machine.Finalizers)
+	require.Empty(t, machine.Status.Address)
+	requireGone(t, k8sClient, &corev1.Pod{}, testMachineName)
+}
+
+// The API server warns at every write of a custom resource whose finalizer has
+// a domain and no path. These are its two checks for a finalizer name.
+func TestMachineFinalizerNameGetsNoWarningFromTheAPIServer(t *testing.T) {
+	require.Empty(t, validation.IsQualifiedName(machineFinalizer))
+
+	domain, path, found := strings.Cut(machineFinalizer, "/")
+	require.True(t, found, "the finalizer name has no path")
+	require.Contains(t, domain, ".")
+	require.NotEmpty(t, path)
+	require.NotContains(t, path, "/")
+}
 
 // Each of these states is a wait, not a failure. The machine takes no address
 // and the provider makes no object until the wait is over.
@@ -406,6 +434,35 @@ func TestMachineReconcilerSkipsAnAddressHeldInAnotherNamespace(t *testing.T) {
 	reconcileMachine(t, reconciler, testMachineName)
 
 	require.Equal(t, testSecondAddress, getInfraMachine(t, k8sClient, testMachineName).Status.Address)
+}
+
+// A machine that is being deleted keeps its address until it is gone: its pod
+// may still run. The address is free for the next machine after that.
+func TestMachineReconcilerFreesTheAddressWhenTheMachineIsGone(t *testing.T) {
+	objects := machineObjects(newInfraMachine(testMachineName))
+	objects = append(objects,
+		newOwnerMachineNamed("second"), newBootstrapDataSecret("second"), newInfraMachine("second"),
+		newOwnerMachineNamed("third"), newBootstrapDataSecret("third"), newInfraMachine("third"),
+	)
+	reconciler, k8sClient := newMachineReconcilerForTest(t, objects...)
+
+	reconcileMachine(t, reconciler, testMachineName)
+	require.Equal(t, testFirstAddress, getInfraMachine(t, k8sClient, testMachineName).Status.Address)
+
+	// The first machine is being deleted and its pod is not gone yet.
+	require.NoError(t, k8sClient.Delete(context.Background(), getInfraMachine(t, k8sClient, testMachineName)))
+	reconcileMachine(t, reconciler, "second")
+	require.Equal(t, testSecondAddress, getInfraMachine(t, k8sClient, "second").Status.Address)
+
+	// The first machine is gone.
+	reconcileMachine(t, reconciler, testMachineName)
+	reconcileMachine(t, reconciler, testMachineName)
+	machines := &infrav1.PodVMMachineList{}
+	require.NoError(t, k8sClient.List(context.Background(), machines))
+	require.Len(t, machines.Items, 2)
+
+	reconcileMachine(t, reconciler, "third")
+	require.Equal(t, testFirstAddress, getInfraMachine(t, k8sClient, "third").Status.Address)
 }
 
 func TestMachineReconcilerReportsAFullAddressRange(t *testing.T) {

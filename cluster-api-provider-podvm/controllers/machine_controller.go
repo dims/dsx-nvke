@@ -20,6 +20,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -42,9 +43,18 @@ const (
 	retryAfter = 30 * time.Second
 	// retryNow retries after a conflict or a stale read, which should clear at once.
 	retryNow = time.Second
+	// deleteRetry is the wait between two looks at the objects of a machine
+	// that is being deleted. A volume claim goes away shortly after its pod,
+	// and no event of the claim reaches this controller.
+	deleteRetry = 2 * time.Second
 
 	podVMClusterKind = "PodVMCluster"
 	podVMMachineKind = "PodVMMachine"
+
+	// machineFinalizer holds a PodVMMachine until its objects are gone. The
+	// name has a domain and a path. The API server warns at every write of an
+	// object whose finalizer has a domain and no path.
+	machineFinalizer = "podvm.infrastructure.cluster.x-k8s.io/machine-cleanup"
 )
 
 // machineProblem is a state that the provider reports in the Ready condition
@@ -122,6 +132,9 @@ func podToMachine(_ context.Context, obj client.Object) []reconcile.Request {
 
 // Reconcile brings the pod of a machine to the state that the machine asks
 // for, or reports why it cannot.
+//
+// A finalizer holds the PodVMMachine until its pod, its volume claims and its
+// copy of the bootstrap Secret are gone. Only then is its address free.
 func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := r.logger.With("namespace", req.Namespace, "podVMMachine", req.Name)
 
@@ -131,6 +144,22 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("failed to get PodVMMachine: %w", err)
+	}
+
+	if !machine.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, machine, logger)
+	}
+
+	if !controllerutil.ContainsFinalizer(machine, machineFinalizer) {
+		// A merge patch replaces the whole list of finalizers. The lock keeps
+		// it from dropping a finalizer that another controller added since
+		// the read.
+		patch := client.MergeFromWithOptions(machine.DeepCopy(), client.MergeFromWithOptimisticLock{})
+		controllerutil.AddFinalizer(machine, machineFinalizer)
+		if err := r.client.Patch(ctx, machine, patch); err != nil && !apierrors.IsConflict(err) {
+			return ctrl.Result{}, fmt.Errorf("failed to add the PodVMMachine finalizer: %w", err)
+		}
+		return ctrl.Result{RequeueAfter: retryNow}, nil
 	}
 
 	ownerMachine, err := capiutil.GetOwnerMachine(ctx, r.client, machine.ObjectMeta)
@@ -403,6 +432,48 @@ func (r *MachineReconciler) reconcileRunningPod(
 	running := fmt.Sprintf("Pod %s/%s runs and its node agent answers", pod.Namespace, pod.Name)
 	setCondition(machine, metav1.ConditionTrue, infrav1.PodRunningReason, running)
 	return ctrl.Result{}, r.patchStatus(ctx, machine, before)
+}
+
+// reconcileDelete deletes the pod, the two volume claims and the copy of the
+// bootstrap Secret of a machine, in whatever state the machine is, and removes
+// the finalizer when all of them are gone.
+//
+// It waits for the objects to be gone, not only for the delete calls. The
+// address is free the moment the PodVMMachine is gone, and a pod that still
+// runs with that address would then share it with a new machine.
+func (r *MachineReconciler) reconcileDelete(
+	ctx context.Context,
+	machine *infrav1.PodVMMachine,
+	logger *slog.Logger,
+) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(machine, machineFinalizer) {
+		return ctrl.Result{}, nil
+	}
+
+	// The provider records the pod namespace before it makes the first object.
+	// A machine with no record has nothing to delete.
+	if machine.Status.PodNamespace != "" && machine.Status.PodName != "" {
+		remaining, err := r.deleteMachineResources(ctx, machine, logger)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if len(remaining) > 0 {
+			logger.Info("Waiting for the objects of the machine to be gone", "remaining", remaining)
+			return ctrl.Result{RequeueAfter: deleteRetry}, r.setNotReady(ctx, machine, infrav1.DeletingReason,
+				fmt.Sprintf("Waiting for the delete of %v", remaining))
+		}
+	}
+
+	patch := client.MergeFromWithOptions(machine.DeepCopy(), client.MergeFromWithOptimisticLock{})
+	controllerutil.RemoveFinalizer(machine, machineFinalizer)
+	if err := r.client.Patch(ctx, machine, patch); err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{RequeueAfter: retryNow}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("failed to remove the finalizer from PodVMMachine %s: %w", machine.Name, err)
+	}
+	logger.Info("Deleted the objects of the machine and released its address", "address", machine.Status.Address)
+	return ctrl.Result{}, nil
 }
 
 // reportProblem turns a machineProblem into the Ready condition and a timed
