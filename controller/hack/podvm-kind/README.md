@@ -140,10 +140,10 @@ kubectl config use-context kind-podvm
 CAPNICO_MODULE_DIR="$(go mod download -json github.com/dsx-ai-factory/cluster-api-provider-nico | jq -r .Dir)"
 export CAPNICO_SOURCE_DIR="${PWD}/controller/.local/capnico-source"
 mkdir -p "${CAPNICO_SOURCE_DIR}"
-cp -R "${CAPNICO_MODULE_DIR}/." "${CAPNICO_SOURCE_DIR}/"
+cp -R "${CAPNICO_MODULE_DIR:?}/." "${CAPNICO_SOURCE_DIR}/"
 chmod -R u+w "${CAPNICO_SOURCE_DIR}"
 CAPNICO_STAGED_CHART_DIR="${PWD}/controller/.local/capnico-chart" KIND_CLUSTER_NAME=podvm \
-  controller/hack/nico-provider/install-capnico.sh
+  bash controller/hack/nico-provider/install-capnico.sh
 controller/hack/podvm-kind/up.sh sim
 ```
 
