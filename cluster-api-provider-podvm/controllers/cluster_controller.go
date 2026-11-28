@@ -144,11 +144,20 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 // patchStatus writes the status when it differs from the status that the
 // reconcile started with.
+//
+// A PodVMCluster has no finalizer, so it is gone the moment it is deleted. A
+// reconcile that started from a cache that still showed it has nothing left
+// to do, and that is not an error.
 func (r *ClusterReconciler) patchStatus(ctx context.Context, infraCluster, before *infrav1.PodVMCluster) error {
 	if apiequality.Semantic.DeepEqual(before.Status, infraCluster.Status) {
 		return nil
 	}
 	if err := r.client.Status().Patch(ctx, infraCluster, client.MergeFrom(before)); err != nil {
+		if objectIsGone(ctx, r.apiReader, infraCluster, &infrav1.PodVMCluster{}, err) {
+			r.logger.Info("PodVMCluster is gone, nothing is left to do",
+				"namespace", infraCluster.Namespace, "podVMCluster", infraCluster.Name)
+			return nil
+		}
 		return fmt.Errorf("failed to update the status of PodVMCluster %s: %w", infraCluster.Name, err)
 	}
 	return nil

@@ -291,6 +291,23 @@ func TestMachineReconcilerWaitsForATenantAPIServerThatDoesNotAnswer(t *testing.T
 	}
 }
 
+// The NVKE controller deletes the Node of a node that it takes down. A Node
+// that goes away between the read and the write is a wait, like a Node that
+// does not exist yet.
+func TestMachineReconcilerWaitsWhenTheTenantNodeGoesAwayBeforeTheWrite(t *testing.T) {
+	reconciler, tenantClient, factory := newMachineReconcilerWithTenant(t, "", nil)
+	factory.client = &failingTenantClient{
+		Client:   tenantClient,
+		patchErr: apierrors.NewNotFound(schema.GroupResource{Resource: "nodes"}, testMachineName),
+	}
+
+	result, err := reconciler.Reconcile(context.Background(), machineRequest(testMachineName))
+	require.NoError(t, err)
+	require.Equal(t, ctrl.Result{RequeueAfter: retryAfter}, result)
+	requireReadyCondition(t, getInfraMachine(t, reconciler.client, testMachineName).Status.Conditions,
+		metav1.ConditionTrue, infrav1.PodRunningReason)
+}
+
 // An API server that answers and rejects the call is a failed reconcile.
 // Waiting does not give the provider the rights it lacks.
 func TestMachineReconcilerReportsATenantAPIServerThatRejectsTheCall(t *testing.T) {

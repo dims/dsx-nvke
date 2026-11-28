@@ -65,6 +65,11 @@ const (
 	rebootAnnotation = "nvke.nvidia.com/reboot"
 )
 
+// errMachineGone means the PodVMMachine was gone when a reconcile wrote to it.
+// The cache still showed it at the read. Reconcile ends such a run with no
+// error: nothing is left to do, and the next read would not find the machine.
+var errMachineGone = errors.New("the PodVMMachine is gone")
+
 // machineProblem is a state that the provider reports in the Ready condition
 // and then waits on. It is not a failure of the reconcile.
 type machineProblem struct {
@@ -149,6 +154,19 @@ func podToMachine(_ context.Context, obj client.Object) []reconcile.Request {
 func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := r.logger.With("namespace", req.Namespace, "podVMMachine", req.Name)
 
+	result, err := r.reconcile(ctx, req, logger)
+	if errors.Is(err, errMachineGone) {
+		// The usual case is the end of a delete: the reconcile before this
+		// one removed the finalizer, and the cache did not show that yet.
+		logger.Info("PodVMMachine is gone, nothing is left to do")
+		return ctrl.Result{}, nil
+	}
+	return result, err
+}
+
+// reconcile is one run for one machine. It returns errMachineGone when a
+// write finds that the machine no longer exists.
+func (r *MachineReconciler) reconcile(ctx context.Context, req ctrl.Request, logger *slog.Logger) (ctrl.Result, error) {
 	machine := &infrav1.PodVMMachine{}
 	if err := r.client.Get(ctx, req.NamespacedName, machine); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -168,6 +186,10 @@ func (r *MachineReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		patch := client.MergeFromWithOptions(machine.DeepCopy(), client.MergeFromWithOptimisticLock{})
 		controllerutil.AddFinalizer(machine, machineFinalizer)
 		if err := r.client.Patch(ctx, machine, patch); err != nil && !apierrors.IsConflict(err) {
+			// A machine with no finalizer is gone the moment it is deleted.
+			if r.machineIsGone(ctx, machine, err) {
+				return ctrl.Result{}, errMachineGone
+			}
 			return ctrl.Result{}, fmt.Errorf("failed to add the PodVMMachine finalizer: %w", err)
 		}
 		return ctrl.Result{RequeueAfter: retryNow}, nil
@@ -338,6 +360,11 @@ func (r *MachineReconciler) allocateAddress(
 			logger.Info("Conflict while recording an address, retrying", "address", address.String())
 			return ctrl.Result{RequeueAfter: retryNow}, nil
 		}
+		// No object exists yet for this machine, and none is made for a
+		// machine that is gone.
+		if r.machineIsGone(ctx, machine, err) {
+			return ctrl.Result{}, errMachineGone
+		}
 		return ctrl.Result{}, fmt.Errorf("failed to record address %s on PodVMMachine %s: %w", address, machine.Name, err)
 	}
 
@@ -442,6 +469,11 @@ func (r *MachineReconciler) answerRebootRequest(
 ) (bool, error) {
 	current := &infrav1.PodVMMachine{}
 	if err := r.apiReader.Get(ctx, client.ObjectKeyFromObject(machine), current); err != nil {
+		if apierrors.IsNotFound(err) {
+			// The API server says so itself. No pod is deleted and no pod is
+			// made for a machine that is gone.
+			return false, errMachineGone
+		}
 		return false, fmt.Errorf("failed to read the reboot record of PodVMMachine %s: %w", machine.Name, err)
 	}
 	if current.Status.LastRebootRequest == request {
@@ -498,6 +530,9 @@ func (r *MachineReconciler) reconcileRunningPod(
 			if apierrors.IsConflict(err) {
 				logger.Info("Conflict while setting the provider ID, retrying")
 				return ctrl.Result{RequeueAfter: retryNow}, nil
+			}
+			if r.machineIsGone(ctx, machine, err) {
+				return ctrl.Result{}, errMachineGone
 			}
 			return ctrl.Result{}, fmt.Errorf("failed to set the provider ID of PodVMMachine %s: %w", machine.Name, err)
 		}
@@ -584,6 +619,13 @@ func (r *MachineReconciler) reconcileDelete(
 	if err := r.client.Patch(ctx, machine, patch); err != nil {
 		if apierrors.IsConflict(err) {
 			return ctrl.Result{RequeueAfter: retryNow}, nil
+		}
+		// The delete is complete already. The reconcile before this one
+		// removed the finalizer, and this one started from a cache that did
+		// not show it yet. Every object of the machine is gone: this run
+		// read each of them directly a moment ago.
+		if r.machineIsGone(ctx, machine, err) {
+			return ctrl.Result{}, errMachineGone
 		}
 		return ctrl.Result{}, fmt.Errorf("failed to remove the finalizer from PodVMMachine %s: %w", machine.Name, err)
 	}
@@ -683,6 +725,12 @@ func (r *MachineReconciler) reconcileNodeProviderID(
 			logger.Info("Tenant Node changed while setting its provider ID; retrying", "node", node.Name)
 			return nodeLook{result: ctrl.Result{RequeueAfter: retryNow}}, nil
 		}
+		if apierrors.IsNotFound(err) {
+			// The Node went away between the read and the write. The NVKE
+			// controller deletes the Node of a node that it takes down.
+			logger.Info("Tenant Node is gone, waiting for it", "node", ownerMachine.Name)
+			return waitFor, nil
+		}
 		if tenantAPIServerGaveNoAnswer(err) {
 			return noAnswer("patch tenant Node", err)
 		}
@@ -742,13 +790,23 @@ func (r *MachineReconciler) setNotReady(
 }
 
 // patchStatus writes the status when it differs from the given earlier state.
-// Most reconciles of a machine that runs change nothing.
+// Most reconciles of a machine that runs change nothing. It returns
+// errMachineGone when the machine no longer exists.
 func (r *MachineReconciler) patchStatus(ctx context.Context, machine, before *infrav1.PodVMMachine) error {
 	if apiequality.Semantic.DeepEqual(before.Status, machine.Status) {
 		return nil
 	}
 	if err := r.client.Status().Patch(ctx, machine, client.MergeFrom(before)); err != nil {
+		if r.machineIsGone(ctx, machine, err) {
+			return errMachineGone
+		}
 		return fmt.Errorf("failed to update the status of PodVMMachine %s: %w", machine.Name, err)
 	}
 	return nil
+}
+
+// machineIsGone reports whether a write to the PodVMMachine failed because
+// the machine no longer exists. See objectIsGone.
+func (r *MachineReconciler) machineIsGone(ctx context.Context, machine *infrav1.PodVMMachine, writeErr error) bool {
+	return objectIsGone(ctx, r.apiReader, machine, &infrav1.PodVMMachine{}, writeErr)
 }
