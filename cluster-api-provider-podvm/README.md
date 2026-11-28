@@ -97,6 +97,20 @@ domain has `controlPlane: true`.
 A cluster with no control plane Service has no finalizer, and its delete never
 waits for the provider.
 
+### Fields that cannot change
+
+The provider makes the pod of a machine again after a lost pod and after a
+reboot request, from the `PodVMCluster` as it is at that time. So a changed
+field would reach the machines that exist one at a time, in no order, each on
+the volumes of its old pod. The API server refuses a change of these fields:
+
+| Field | What a change would do |
+|---|---|
+| `podNamespace` | New machines would run in another namespace than the machines that exist and the control plane Service |
+| `addressRange` | The machines that exist hold addresses of the old block |
+| `controlPlaneService` | See [The control plane Service](#the-control-plane-service) |
+| `runtimeClassName` | The next pod of each machine would run in another runtime. What the RuntimeClass names can change in the host cluster, for example with a new version of Kata |
+
 ### The control plane Service
 
 With `spec.controlPlaneService` the cluster controller makes the shared endpoint
