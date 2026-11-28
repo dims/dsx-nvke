@@ -257,3 +257,96 @@ func TestResolvedClusterNetworkValidateControlPlaneVIP(t *testing.T) {
 	require.ErrorContains(t, network.validateControlPlaneVIP("10.233.0.10"), "network.serviceCIDR")
 	assert.NoError(t, network.validateControlPlaneVIP("172.31.0.10"))
 }
+
+func TestResolvedClusterNetworkValidateControlPlaneEndpoint(t *testing.T) {
+	network, err := resolveClusterNetwork(&api.ClusterNetworkCreateConfig{
+		PodCIDR:     "10.232.64.0/18,10.233.64.0/18",
+		ServiceCIDR: "10.233.0.0/18",
+	})
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		endpoint string
+		// wantErr lists the parts the error must contain. Empty means valid.
+		wantErr []string
+	}{
+		{name: "an IPv4 address", endpoint: "172.31.0.10"},
+		{name: "an IPv4 address with a port", endpoint: "172.31.0.10:6443"},
+		{name: "a DNS name", endpoint: "lb.example.com"},
+		{name: "a DNS name with a port", endpoint: "lb.example.com:8443"},
+		{name: "a single-label DNS name with the highest port", endpoint: "api-1:65535"},
+		{name: "a DNS name is not checked against the CIDRs", endpoint: "10-233-64-10.example.com:6443"},
+
+		{name: "an IPv4 host inside a pod CIDR", endpoint: "10.233.64.10:6443", wantErr: []string{"controlPlaneEndpoint", "network.podCIDR"}},
+		{name: "an IPv4 host inside the second pod CIDR", endpoint: "10.232.64.10", wantErr: []string{"controlPlaneEndpoint", "network.podCIDR"}},
+		{name: "an IPv4 host inside the service CIDR", endpoint: "10.233.0.10:6443", wantErr: []string{"controlPlaneEndpoint", "network.serviceCIDR"}},
+
+		{name: "an empty value", endpoint: "", wantErr: []string{"the host is empty"}},
+		{name: "a port without a host", endpoint: ":6443", wantErr: []string{"the host is empty"}},
+		{name: "a colon without a port", endpoint: "lb.example.com:", wantErr: []string{"port"}},
+		{name: "port zero", endpoint: "lb.example.com:0", wantErr: []string{"port"}},
+		{name: "a port above the range", endpoint: "lb.example.com:65536", wantErr: []string{"port"}},
+		{name: "a port name", endpoint: "lb.example.com:https", wantErr: []string{"port"}},
+		{name: "a signed port", endpoint: "lb.example.com:+6443", wantErr: []string{"port"}},
+		{name: "a space after the port", endpoint: "lb.example.com:6443 ", wantErr: []string{"port"}},
+		{name: "an IPv6 address", endpoint: "2001:db8::1", wantErr: []string{"IPv4 address or a DNS name"}},
+		{name: "an IPv6 address in brackets with a port", endpoint: "[2001:db8::1]:6443", wantErr: []string{"IPv4 address or a DNS name"}},
+		{name: "a URL", endpoint: "https://lb.example.com:6443", wantErr: []string{"IPv4 address or a DNS name"}},
+		{name: "an IPv4 address with an octet out of range", endpoint: "10.233.0.300:6443", wantErr: []string{"not a valid IPv4 address"}},
+		{name: "an IPv4 address with too few octets", endpoint: "10.233", wantErr: []string{"not a valid IPv4 address"}},
+		{name: "an upper-case DNS name", endpoint: "LB.example.com", wantErr: []string{"IPv4 address or a DNS name"}},
+		{name: "a DNS name with an underscore", endpoint: "lb_1.example.com:6443", wantErr: []string{"IPv4 address or a DNS name"}},
+		{name: "a space before the host", endpoint: " lb.example.com", wantErr: []string{"IPv4 address or a DNS name"}},
+		{name: "a blank value", endpoint: " ", wantErr: []string{"IPv4 address or a DNS name"}},
+		{name: "a path after the host", endpoint: "lb.example.com/api", wantErr: []string{"IPv4 address or a DNS name"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := network.validateControlPlaneEndpoint(tt.endpoint)
+			if len(tt.wantErr) == 0 {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			for _, part := range tt.wantErr {
+				assert.ErrorContains(t, err, part)
+			}
+		})
+	}
+}
+
+func TestResolvedClusterNetworkValidateAPIServerEndpointFields(t *testing.T) {
+	network, err := resolveClusterNetwork(&api.ClusterNetworkCreateConfig{
+		PodCIDR:     "10.232.64.0/18,10.233.64.0/18",
+		ServiceCIDR: "10.233.0.0/18",
+	})
+	require.NoError(t, err)
+
+	tests := []struct {
+		name                 string
+		controlPlaneVIP      string
+		controlPlaneEndpoint string
+		wantErr              string
+	}{
+		{name: "neither field"},
+		{name: "a valid VIP", controlPlaneVIP: "172.31.0.10"},
+		{name: "a valid endpoint", controlPlaneEndpoint: "lb.example.com:6443"},
+		{name: "both fields", controlPlaneVIP: "172.31.0.10", controlPlaneEndpoint: "lb.example.com:6443", wantErr: "mutually exclusive"},
+		{name: "both fields with the same address", controlPlaneVIP: "172.31.0.10", controlPlaneEndpoint: "172.31.0.10", wantErr: "mutually exclusive"},
+		{name: "an invalid VIP", controlPlaneVIP: "10.233.0.10", wantErr: "controlPlaneVIP"},
+		{name: "an invalid endpoint", controlPlaneEndpoint: "10.233.0.10:6443", wantErr: "controlPlaneEndpoint"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := network.validateAPIServerEndpointFields(tt.controlPlaneVIP, tt.controlPlaneEndpoint)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
+}
