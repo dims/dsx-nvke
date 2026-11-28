@@ -55,6 +55,12 @@ const (
 	// name has a domain and a path. The API server warns at every write of an
 	// object whose finalizer has a domain and no path.
 	machineFinalizer = "podvm.infrastructure.cluster.x-k8s.io/machine-cleanup"
+
+	// rebootAnnotation is the annotation on the Machine with which the NVKE
+	// controller asks for a hard reboot. Its value is the time of the request.
+	// The NVKE controller writes it under this key only, and it removes the
+	// annotation itself when the Node reports a new boot ID.
+	rebootAnnotation = "nvke.nvidia.com/reboot"
 )
 
 // machineProblem is a state that the provider reports in the Ready condition
@@ -91,8 +97,9 @@ func NewMachineReconciler(k8sClient client.Client, apiReader client.Reader, logg
 
 // SetupWithManager registers the reconciler with a manager.
 //
-// The reconciler also watches the Machines, because the bootstrap data
-// arrives there, and the pods it made, because a lost pod must come back.
+// The reconciler also watches the Machines, because the bootstrap data and a
+// reboot request arrive there, and the pods it made, because a lost pod must
+// come back.
 //
 // One reconcile runs at a time. An address is safe from a second machine only
 // because one writer reads the used addresses and then takes a free one.
@@ -339,9 +346,9 @@ func (r *MachineReconciler) allocateAddress(
 	return ctrl.Result{}, nil
 }
 
-// reconcilePod makes the pod of the machine when it does not exist. It returns
-// the pod when the pod runs and the node agent in it answers, and nil while
-// the machine waits for that.
+// reconcilePod makes the pod of the machine when it does not exist and answers
+// a reboot request. It returns the pod when the pod runs and the node agent in
+// it answers, and nil while the machine waits for that.
 //
 // The same rule serves the first pod and every later one. A pod that is gone,
 // for any reason, is made again with the same name, claims, address and
@@ -364,6 +371,19 @@ func (r *MachineReconciler) reconcilePod(
 		return r.reportProblem(ctx, machine, err, logger)
 	}
 
+	if request := ownerMachine.Annotations[rebootAnnotation]; request != "" && request != machine.Status.LastRebootRequest {
+		answered, err := r.answerRebootRequest(ctx, machine, pod, request, logger)
+		if err != nil {
+			return nil, ctrl.Result{}, err
+		}
+		if answered && pod != nil {
+			// The event of the pod delete starts the reconcile that makes the
+			// new pod.
+			return nil, ctrl.Result{}, r.setNotReady(ctx, machine, infrav1.WaitingForPodReason,
+				fmt.Sprintf("Pod %s/%s is being deleted for the reboot request %q", pod.Namespace, pod.Name, request))
+		}
+	}
+
 	switch {
 	case pod == nil:
 		if err := r.createPodResources(ctx, machine, ownerMachine, infraCluster, logger); err != nil {
@@ -371,6 +391,20 @@ func (r *MachineReconciler) reconcilePod(
 		}
 		return nil, ctrl.Result{}, r.setNotReady(ctx, machine, infrav1.WaitingForPodReason,
 			fmt.Sprintf("Pod %s/%s is made and does not run yet", machine.Status.PodNamespace, machine.Status.PodName))
+
+	case !pod.DeletionTimestamp.IsZero():
+		return nil, ctrl.Result{}, r.setNotReady(ctx, machine, infrav1.WaitingForPodReason,
+			fmt.Sprintf("Pod %s/%s is being deleted, a new pod follows", pod.Namespace, pod.Name))
+
+	case pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded:
+		// The pod ended and never runs again, for example after an eviction.
+		// It counts as lost: delete it, and the next reconcile makes it again.
+		logger.Warn("Pod ended, deleting it so that a new pod can take its place", "pod", pod.Name, "phase", pod.Status.Phase)
+		if err := r.deletePod(ctx, pod); err != nil {
+			return nil, ctrl.Result{}, err
+		}
+		return nil, ctrl.Result{}, r.setNotReady(ctx, machine, infrav1.WaitingForPodReason,
+			fmt.Sprintf("Pod %s/%s ended in the phase %s and is replaced", pod.Namespace, pod.Name, pod.Status.Phase))
 
 	case pod.Status.Phase != corev1.PodRunning:
 		return nil, ctrl.Result{}, r.setNotReady(ctx, machine, infrav1.WaitingForPodReason,
@@ -384,6 +418,43 @@ func (r *MachineReconciler) reconcilePod(
 	}
 
 	return pod, ctrl.Result{}, nil
+}
+
+// answerRebootRequest answers one value of the reboot annotation one time: it
+// deletes the pod and records the value. The bool reports whether this call
+// answered the request.
+//
+// The provider makes no new pod before the record is written, so a pod that
+// exists while the value is not recorded is the pod from before the request.
+// The cache can lag behind that record, and then the pod it shows could be
+// the new one. So the provider asks the API server for the record before it
+// deletes a pod.
+func (r *MachineReconciler) answerRebootRequest(
+	ctx context.Context,
+	machine *infrav1.PodVMMachine,
+	pod *corev1.Pod,
+	request string,
+	logger *slog.Logger,
+) (bool, error) {
+	current := &infrav1.PodVMMachine{}
+	if err := r.apiReader.Get(ctx, client.ObjectKeyFromObject(machine), current); err != nil {
+		return false, fmt.Errorf("failed to read the reboot record of PodVMMachine %s: %w", machine.Name, err)
+	}
+	if current.Status.LastRebootRequest == request {
+		logger.Info("Reboot request is already answered, waiting for the cache", "request", request)
+		return false, nil
+	}
+
+	if pod != nil && pod.DeletionTimestamp.IsZero() {
+		logger.Info("Deleting the pod for a reboot request", "pod", pod.Name, "request", request)
+		if err := r.deletePod(ctx, pod); err != nil {
+			return false, err
+		}
+	}
+
+	before := machine.DeepCopy()
+	machine.Status.LastRebootRequest = request
+	return true, r.patchStatus(ctx, machine, before)
 }
 
 // reconcileRunningPod reports a machine whose node agent answers: it writes
