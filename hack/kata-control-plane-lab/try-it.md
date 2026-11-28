@@ -5,7 +5,7 @@ State of 2026-11-28. The guide uses two public branches:
 - `integration/control-plane-kata-pods` of `https://github.com/dims/dsx-nvke`, at `8bc32175`
 - `integration/control-plane-kata-pods` of `https://github.com/dims/kata-containers`, at `96a8d905b`
 
-**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Scenarios 1 to 7 and 10 passed too. Scenario 6 passed at its second try, on a cluster that was made again: "Known obstacles" has why. Each other scenario ran in our test lab in some form, or it never ran. A mark on each step and each scenario says which. Expect to find faults, and tell us where.
+**Nothing of this path ran from start to end yet.** A first run of the guide is under way since 2026-11-28. Part 1, the 13 set up steps, passed in it. Four steps needed a fix of the branch first (7, 11, 12 and the port of 13). Each of the ten scenarios passed. Scenario 6 passed at its second try, on a cluster that was made again: "Known obstacles" has why. A mark on each step and each scenario says how it ran. Expect to find faults, and tell us where.
 
 ## What the feature is
 
@@ -391,7 +391,7 @@ kc -n kube-system exec etcd-$N -- etcdctl --endpoints=https://127.0.0.1:2379 \
 
 ### Scenario 8, upgrade the Kubernetes version
 
-**Lab.** The lab went from 1.35.5 to 1.36.4 with a node image that is not public. A node image for 1.37.0 from the public scripts is **New**.
+**Ran in the first run of 2026-11-28, on a cluster that was made again.** It was the first upgrade with a node image for 1.37.0 from the public scripts.
 
 A node runs only the version that its image carries. So build a second pair of images first. Run the second command of step 5 again, with `CAPD_KINDEST_NODE_IMAGE=cwe-capd-kindest-node:v1.37.0` in place of its image name and with `CAPD_KINDEST_NODE_TAG=v1.37.0` added. Then:
 
@@ -403,11 +403,13 @@ load podvm-node:v1.37.0
 ```
 
 - **Pass.** NVKE replaces each control plane node. `kc get nodes` shows `v1.37.0` on the three control plane nodes, and the cluster is `Provisioned`. The worker keeps its version.
-- **Time.** The lab measured 27 minutes.
+- **Time.** In the first run the two image builds took 44 s and 24 s, the load 2 min 3 s, and the upgrade 12 min 44 s.
+- The loop of scenario 5 on the API had 740 of 742 calls with an answer. Two calls failed within 6 s, when NVKE ran the last upgrade step on the newest node and its etcd started again.
+- A load of a second node image takes about 12 GB of disk in the four kind nodes.
 
 ### Scenario 9, workers from the simulator
 
-**Lab.** In the lab a worker had two networks. A worker with one network is **New**.
+**Ran in the first run of 2026-11-28, on a cluster that was made again.** Each worker has one network.
 
 ```bash
 ID=$(nvkectl get clusters podvm-example -o json | jq -r '.[0].id')
@@ -422,7 +424,8 @@ kc label node <name of that worker> nvke.nvidia.com/reboot=try-1
 - **Pass, add.** The new workers join and are Ready. `docker ps` shows one container for each worker.
 - **Pass, remove.** The worker leaves the cluster, its container is gone, and NVKE makes a new one because the pool still asks for its count.
 - **Pass, reboot.** The Node is not Ready for a short time. Then it is Ready with another boot ID.
-- **Time.** The lab measured 57 s for a new worker, 68 s for a delete with a new worker, and 61 s for a reboot.
+- **Time.** In the first run 57 s for the two new workers, 73 s for a delete with a new worker, and 12 s for a reboot. The run made the reboot request for a worker that had joined some seconds before.
+- A worker of the simulator runs the Kubernetes version of its image, v1.36.4, also after scenario 8, where `nvkectl get nodepools --cluster podvm-example` shows 1.37.0 for the new pool.
 - A lower count of a pool removes no node. Only a node delete does.
 - No product page has the label command. The label is the reboot request of NVKE.
 
